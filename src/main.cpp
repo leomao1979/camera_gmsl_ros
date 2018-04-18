@@ -100,8 +100,6 @@ uint32_t gScreenshotCount = 0;
 
 bool g_RCCB = false;
 
-image_transport::Publisher image_pub;
-
 // Program arguments
 ProgramArguments g_arguments(
     {
@@ -132,7 +130,6 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
 void sig_int_handler(int sig);
 void keyPressCallback(int key);
 
-void initRos(int argc, char **argv);
 void publish_image(LMImagePublisher *publisher, const dwImageCUDA& rgbaImage);
 
 //------------------------------------------------------------------------------
@@ -190,7 +187,7 @@ int main(int argc, const char **argv)
 
     float32_t framerate = cameraProps.framerate;
 
-    initRos(argc, (char **)argv);
+    ros::init(argc, const_cast<char **>(argv), "gmsl_camera_image_publisher");
     runNvMedia_pipeline(window, renderer, cameraSensor, &rawImageProps, &cameraProps, sdk, framerate);
 
     dwRenderer_release(&renderer);
@@ -587,19 +584,10 @@ void keyPressCallback(int key)
 }
 
 //-----------------------------------------------------------------------------
-void initRos(int argc, char **argv) {
-    ros::init(argc, argv, "gmsl_camera_image_publisher");
-    ros::NodeHandle nh;
-    image_transport::ImageTransport it(nh);
-    image_pub = it.advertise("/camera/raw_image", 1);
-}
-
-//-----------------------------------------------------------------------------
 void publish_image(LMImagePublisher *publisher, const dwImageCUDA& rgbaImage) {
     std::vector<uint32_t> cpuData;
     cpuData.resize(rgbaImage.prop.width * rgbaImage.prop.height);
     cudaMemcpy2D(cpuData.data(), rgbaImage.prop.width*4, rgbaImage.dptr[0], rgbaImage.pitch[0], rgbaImage.prop.width*4, rgbaImage.prop.height, cudaMemcpyDeviceToHost);
-  	
-	publisher->publish(reinterpret_cast<uint8_t *>(cpuData.data()), rgbaImage.prop.width, rgbaImage.prop.height); 
+    publisher->publish(reinterpret_cast<uint8_t *>(cpuData.data()), rgbaImage.prop.width, rgbaImage.prop.height); 
 }
 
