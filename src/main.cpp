@@ -83,6 +83,7 @@
 
 #include <ros/ros.h>
 #include "LMImagePublisher.hpp"
+#include "LMCompressedImagePublisher.hpp"
 
 //------------------------------------------------------------------------------
 // Variables
@@ -131,6 +132,7 @@ void sig_int_handler(int sig);
 void keyPressCallback(int key);
 
 void publish_image(LMImagePublisher *publisher, const dwImageCUDA& rgbaImage);
+void publish_image(LMCompressedImagePublisher *publisher, const dwImageCUDA& rgbaImage);
 
 //------------------------------------------------------------------------------
 int main(int argc, const char **argv)
@@ -412,7 +414,8 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
 
     result = dwImageStreamer_initialize(&cuda2gl, &glProperties, DW_IMAGE_GL, sdk);
     if (result == DW_SUCCESS) {
-		LMImagePublisher *publisher = new LMImagePublisher("/camera/image");
+		//LMImagePublisher *publisher = new LMImagePublisher("/camera/image");
+		LMCompressedImagePublisher *publisher = new LMCompressedImagePublisher("/camera/image_compressed");
         while (g_run && !window->shouldClose()) {
             std::this_thread::yield();
 
@@ -591,3 +594,15 @@ void publish_image(LMImagePublisher *publisher, const dwImageCUDA& rgbaImage) {
     publisher->publish(reinterpret_cast<uint8_t *>(cpuData.data()), rgbaImage.prop.width, rgbaImage.prop.height); 
 }
 
+//-----------------------------------------------------------------------------
+void publish_image(LMCompressedImagePublisher *publisher, const dwImageCUDA& rgbaImage) {
+	std::vector<uint32_t> cpuData;
+	cpuData.resize(rgbaImage.prop.width * rgbaImage.prop.height);
+	cudaMemcpy2D(cpuData.data(), rgbaImage.prop.width*4, rgbaImage.dptr[0], rgbaImage.pitch[0], rgbaImage.prop.width*4, rgbaImage.prop.height, cudaMemcpyDeviceToHost);
+
+	unsigned char* compressed_image = NULL;
+	size_t compressed_image_size = 0;
+	lodepng_encode32(&compressed_image, &compressed_image_size, reinterpret_cast<uint8_t*>(cpuData.data()), rgbaImage.prop.width, rgbaImage.prop.height);
+	publisher->publish(reinterpret_cast<uint8_t *>(compressed_image), compressed_image_size);
+	free(compressed_image);
+}
