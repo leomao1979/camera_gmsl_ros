@@ -75,6 +75,7 @@
 // IMAGE
 #include <dw/image/FormatConverter.h>
 #include <dw/image/ImageStreamer.h>
+#include "framework/SimpleFormatConverter.hpp"
 
 // RCCB
 #include <dw/isp/SoftISP.h>
@@ -84,6 +85,10 @@
 #include <ros/ros.h>
 #include "LMImagePublisher.hpp"
 #include "LMCompressedImagePublisher.hpp"
+
+using namespace dw_samples::common;
+typedef std::chrono::high_resolution_clock myclock_t;
+typedef std::chrono::time_point<myclock_t> timepoint_t;
 
 //------------------------------------------------------------------------------
 // Variables
@@ -131,6 +136,7 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
 void sig_int_handler(int sig);
 void keyPressCallback(int key);
 
+void initConverter(GenericSimpleFormatConverter **rbga2rgbConverter, const dwImageProperties& rgbaImageProperties, dwContextHandle_t context);
 void publish_image(LMImagePublisher *publisher, const dwImageCUDA& rgbaImage);
 void publish_image(LMCompressedImagePublisher *publisher, const dwImageCUDA& rgbaImage);
 
@@ -356,8 +362,6 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
     g_run = g_run && dwSensor_start(camera) == DW_SUCCESS;
 
     // time
-    typedef std::chrono::high_resolution_clock myclock_t;
-    typedef std::chrono::time_point<myclock_t> timepoint_t;
     auto frameDuration         = std::chrono::milliseconds((int)(1000 / framerate));
     timepoint_t lastUpdateTime = myclock_t::now();
 
@@ -414,8 +418,10 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
 
     result = dwImageStreamer_initialize(&cuda2gl, &glProperties, DW_IMAGE_GL, sdk);
     if (result == DW_SUCCESS) {
-		//LMImagePublisher *publisher = new LMImagePublisher("/camera/image");
-		LMCompressedImagePublisher *publisher = new LMCompressedImagePublisher("/camera/image_compressed");
+        // LMImagePublisher *publisher = new LMImagePublisher("/camera/image");
+        LMCompressedImagePublisher *publisher = new LMCompressedImagePublisher("/camera/image_compressed");
+        GenericSimpleFormatConverter *converter = nullptr;
+        initConverter(&converter, rgbaImageProperties, sdk);
         while (g_run && !window->shouldClose()) {
             std::this_thread::yield();
 
@@ -490,26 +496,24 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
                 continue;
             }
 
-	    	// Publish image to ROS
-	    	publish_image(publisher, rgbaImage);
+            // Publish RGB image to ROS
+            dwImageCUDA* rgbImage = GenericImage::toDW<dwImageCUDA>(converter->convert(GenericImage::fromDW(&rgbaImage)));
+            publish_image(publisher, *rgbImage);
 
             if (gTakeScreenshot) {
                 char fname[128];
                 {
-                	std::vector<uint16_t> cpuData;
+                    std::vector<uint16_t> cpuData;
                     sprintf(fname, "screenshot_raw_%04d.png", gScreenshotCount);
                     cpuData.resize(realCudaImage.prop.width*realCudaImage.prop.height);
-                    cudaMemcpy2D(cpuData.data(), realCudaImage.prop.width*2, realCudaImage.dptr[0],
-                            realCudaImage.pitch[0], realCudaImage.prop.width*2, realCudaImage.prop.height,
-                            cudaMemcpyDeviceToHost);
-                    lodepng_encode_file(fname, reinterpret_cast<uint8_t*>(cpuData.data()), realCudaImage.prop.width,
-                                        realCudaImage.prop.height, LCT_GREY, 16);
+                    cudaMemcpy2D(cpuData.data(), realCudaImage.prop.width*2, realCudaImage.dptr[0], realCudaImage.pitch[0], realCudaImage.prop.width*2, realCudaImage.prop.height, cudaMemcpyDeviceToHost);
+                    lodepng_encode_file(fname, reinterpret_cast<uint8_t*>(cpuData.data()), realCudaImage.prop.width, realCudaImage.prop.height, LCT_GREY, 16);
 
                     std::cout << "RAW SCREENSHOT TAKEN to " << fname << "\n";
                 }
 
                 {
-                	std::vector<uint32_t> cpuData;
+                    std::vector<uint32_t> cpuData;
                     sprintf(fname, "screenshot_rgba_%04d.png", gScreenshotCount);
                     cpuData.resize(rgbaImage.prop.width*rgbaImage.prop.height);
                     cudaMemcpy2D(cpuData.data(), rgbaImage.prop.width*4, rgbaImage.dptr[0],
@@ -545,6 +549,7 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
             window->swapBuffers();
         }
         dwImageStreamer_release(&cuda2gl);
+        delete converter;
     } else {
         std::cerr << "Cannot create CUDA -> GL streamer" << std::endl;
     }
@@ -587,22 +592,41 @@ void keyPressCallback(int key)
 }
 
 //-----------------------------------------------------------------------------
-void publish_image(LMImagePublisher *publisher, const dwImageCUDA& rgbaImage) {
-    std::vector<uint32_t> cpuData;
-    cpuData.resize(rgbaImage.prop.width * rgbaImage.prop.height);
-    cudaMemcpy2D(cpuData.data(), rgbaImage.prop.width*4, rgbaImage.dptr[0], rgbaImage.pitch[0], rgbaImage.prop.width*4, rgbaImage.prop.height, cudaMemcpyDeviceToHost);
-    publisher->publish(reinterpret_cast<uint8_t *>(cpuData.data()), rgbaImage.prop.width, rgbaImage.prop.height); 
+void initConverter(GenericSimpleFormatConverter **rgba2rgbConverter, const dwImageProperties& rgbaImageProperties, dwContextHandle_t context) {
+    dwImageProperties rgbImageProperties = rgbaImageProperties;
+    rgbImageProperties.pxlFormat = DW_IMAGE_RGB;
+
+    *rgba2rgbConverter = new GenericSimpleFormatConverter(rgbaImageProperties, rgbImageProperties, context);
 }
 
 //-----------------------------------------------------------------------------
-void publish_image(LMCompressedImagePublisher *publisher, const dwImageCUDA& rgbaImage) {
-	std::vector<uint32_t> cpuData;
-	cpuData.resize(rgbaImage.prop.width * rgbaImage.prop.height);
-	cudaMemcpy2D(cpuData.data(), rgbaImage.prop.width*4, rgbaImage.dptr[0], rgbaImage.pitch[0], rgbaImage.prop.width*4, rgbaImage.prop.height, cudaMemcpyDeviceToHost);
+void publish_image(LMImagePublisher *publisher, const dwImageCUDA& rgbImage) {
+    std::vector<uint8_t> cpuData;
+    cpuData.resize(rgbImage.prop.width * rgbImage.prop.height * 3);
+    cudaMemcpy2D(cpuData.data(), rgbImage.prop.width*3, rgbImage.dptr[0], rgbImage.pitch[0], rgbImage.prop.width*3, rgbImage.prop.height, cudaMemcpyDeviceToHost);
 
-	unsigned char* compressed_image = NULL;
-	size_t compressed_image_size = 0;
-	lodepng_encode32(&compressed_image, &compressed_image_size, reinterpret_cast<uint8_t*>(cpuData.data()), rgbaImage.prop.width, rgbaImage.prop.height);
-	publisher->publish(reinterpret_cast<uint8_t *>(compressed_image), compressed_image_size);
-	free(compressed_image);
+    publisher->publish(cpuData.data(), rgbImage.prop.width, rgbImage.prop.height);
+}
+
+//-----------------------------------------------------------------------------
+void publish_image(LMCompressedImagePublisher *publisher, const dwImageCUDA& rgbImage) {
+    std::vector<uint8_t> cpuData;
+    cpuData.resize(rgbImage.prop.width * rgbImage.prop.height * 3);
+    cudaMemcpy2D(cpuData.data(), rgbImage.prop.width*3, rgbImage.dptr[0], rgbImage.pitch[0], rgbImage.prop.width*3, rgbImage.prop.height, cudaMemcpyDeviceToHost);
+
+    unsigned char* compressed_image = NULL;
+    size_t compressed_image_size = 0;
+    timepoint_t t0 = myclock_t::now();
+    lodepng_encode24(&compressed_image, &compressed_image_size, cpuData.data(), rgbImage.prop.width, rgbImage.prop.height);
+    timepoint_t t1 = myclock_t::now();
+    std::cout << "Original image size: " << cpuData.size() << "; Compressed image size: " << compressed_image_size << std::endl;
+
+    publisher->publish(reinterpret_cast<uint8_t *>(compressed_image), "png", compressed_image_size);
+
+    timepoint_t t2 = myclock_t::now();
+    std::chrono::milliseconds encoding_time = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
+    std::chrono::milliseconds publish_time = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    std::cout << "Encoding time: " << std::to_string(encoding_time.count()) << "; Publish time: " << std::to_string(publish_time.count()) << std::endl;
+
+    free(compressed_image);
 }
