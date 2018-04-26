@@ -8,10 +8,11 @@ class LMCompressedImagePublisher {
 
 public:
     LMCompressedImagePublisher(const std::string& topic);
-    void publish(uint8_t *compressed_image, const std::string& format, size_t size);
+    void publish(uint8_t *compressed_image, const ros::Time& stamp, const std::string& format, size_t size);
 
-    ros::NodeHandle nh;
-    ros::Publisher image_pub; 
+    ros::NodeHandle m_nh;
+    ros::Publisher m_imagePub;
+    int m_seq;
 };
 
 #endif

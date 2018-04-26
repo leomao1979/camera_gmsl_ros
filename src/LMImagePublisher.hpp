@@ -10,11 +10,12 @@ class LMImagePublisher {
 public:
     LMImagePublisher(const std::string& topic);
     // data: RGB format
-    void publish(uint8_t *data, int width, int height);
+    void publish(uint8_t *data, const ros::Time& stamp, int width, int height);
 
-    ros::NodeHandle nh;
-    image_transport::ImageTransport it;
-    image_transport::Publisher image_pub;
+    ros::NodeHandle m_nh;
+    image_transport::ImageTransport m_it;
+    image_transport::Publisher m_imagePub;
+    int m_seq;
 };
 
 #endif

@@ -76,16 +76,17 @@ endforeach()
 #-------------------------------------------------------------------------------
 set(SOURCES
     src/main.cpp
-	src/LMImagePublisher.cpp
-	src/LMCompressedImagePublisher.cpp
+    src/LMImagePublisher.cpp
+    src/LMCompressedImagePublisher.cpp
 )
 
 set(LIBRARIES
-	glfw
+    glfw
     dw_samples_framework
     ${Driveworks_LIBRARIES}
     lodepng
-	${catkin_LIBRARIES}
+    gpujpeg
+    ${catkin_LIBRARIES}
 )
 
 #-------------------------------------------------------------------------------
