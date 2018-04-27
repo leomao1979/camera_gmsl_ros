@@ -121,6 +121,7 @@ ProgramArguments g_arguments(
         ProgramArguments::Option_t("slave", "0"),
         ProgramArguments::Option_t("fifo-size", "3"),
         ProgramArguments::Option_t("ros-topic", ""),
+        ProgramArguments::Option_t("offscreen", "false"),
     });
 
 //------------------------------------------------------------------------------
@@ -128,7 +129,7 @@ ProgramArguments g_arguments(
 //------------------------------------------------------------------------------
 int main(int argc, const char **argv);
 void parseArguments(int argc, const char **argv);
-void initGL(WindowBase **window);
+void initGL(WindowBase **window, bool offscreen);
 void initSdk(dwContextHandle_t *context, WindowBase *window);
 void initRenderer(dwRendererHandle_t *renderer, dwContextHandle_t context, WindowBase *window);
 void initSensors(dwSALHandle_t *sal, dwSensorHandle_t *camera, dwImageProperties *cameraImageProperties, dwCameraProperties* cameraProperties, dwContextHandle_t context);
@@ -156,7 +157,6 @@ int main(int argc, const char **argv)
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     action.sa_handler = sig_int_handler;
-
     sigaction(SIGHUP, &action, NULL);  // controlling terminal closed, Ctrl-D
     sigaction(SIGINT, &action, NULL);  // Ctrl-C
     sigaction(SIGQUIT, &action, NULL); // Ctrl-\, clean quit with core dump
@@ -167,8 +167,7 @@ int main(int argc, const char **argv)
     g_run = true;
 
     parseArguments(argc, argv);
-
-    initGL(&window);
+    initGL(&window, g_arguments.enabled("offscreen"));
     initSdk(&sdk, window);
     initRenderer(&renderer, sdk, window);
 
@@ -226,10 +225,9 @@ void parseArguments(int argc, const char **argv)
 }
 
 //------------------------------------------------------------------------------
-void initGL(WindowBase **window)
+void initGL(WindowBase **window, bool offscreen)
 {
-    if (!*window)
-        *window = new WindowGLFW(1280, 800);
+    if (!*window) *window = new WindowGLFW("Camera GMSL", 1280, 800, offscreen);
 
     (*window)->makeCurrent();
     (*window)->setOnKeypressCallback(keyPressCallback);
@@ -418,12 +416,12 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
     if (result == DW_SUCCESS) {
         bool compress_mode = false;
         string rosTopic = g_arguments.get("ros-topic");
-        cout << "rosTopic: " << rosTopic << endl;
         if (rosTopic.find(ROS_TOPIC_IMAGE_COMPRESSED) == 0) {
             compress_mode = true; 
         } else if (rosTopic.empty()) {
             rosTopic = ROS_TOPIC_IMAGE; 
         }
+        cout << "rosTopic: " << rosTopic << endl;
         LMImagePublisher *publisher = new LMImagePublisher(rosTopic, compress_mode);
         struct gpujpeg_encoder *encoder = nullptr;
         if (compress_mode) {
