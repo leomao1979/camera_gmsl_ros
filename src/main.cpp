@@ -195,7 +195,6 @@ int main(int argc, const char **argv)
     sensorData.bottom.bufferSize = MAX_EMBED_DATA_SIZE;
 
     float32_t framerate = cameraProps.framerate;
-    cout << "framerate: " << framerate << endl;
     ros::init(argc, const_cast<char **>(argv), "gmsl_camera_image_publisher");
     runNvMedia_pipeline(window, renderer, cameraSensor, &rawImageProps, &cameraProps, sdk, framerate);
 
@@ -280,8 +279,7 @@ void initSensors(dwSALHandle_t *sal, dwSensorHandle_t *camera, dwImageProperties
 
     result = dwSAL_initialize(sal, context);
     if (result != DW_SUCCESS) {
-        std::cerr << "Cannot initialize SAL: "
-                    << dwGetStatusName(result) << std::endl;
+        std::cerr << "Cannot initialize SAL: " << dwGetStatusName(result) << std::endl;
         exit(1);
     }
 
@@ -303,8 +301,6 @@ void initSensors(dwSALHandle_t *sal, dwSensorHandle_t *camera, dwImageProperties
                                      DW_CAMERA_RAW_IMAGE,
                                     *camera);
     dwSensorCamera_getSensorProperties(cameraProperties, *camera);
-
-    std::cout << "Camera image with " << cameraImageProperties->width << "x" << cameraImageProperties->height << " at " << cameraProperties->framerate << " FPS" << std::endl;
 }
 
 //------------------------------------------------------------------------------
@@ -366,7 +362,6 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
     // RGBA image properties, this image is the result of conversion from raw to processed
     dwImageProperties rgbaImageProperties = rawPxlDataOnlyImageProps;
     rgbaImageProperties.type = DW_IMAGE_CUDA;
-
     // RCCB specific variables
     dwImageProperties rcbProperties;
     dwImageCUDA rcbImage;
@@ -375,8 +370,7 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
         rcbImage.prop = rcbProperties;
         rcbImage.layout = DW_IMAGE_CUDA_PITCH;
 
-        cudaMallocPitch(&rcbImage.dptr[0], &rcbImage.pitch[0], rcbProperties.width * dwSizeOf(rcbProperties.pxlType),
-            rcbProperties.height * rcbProperties.planeCount);
+        cudaMallocPitch(&rcbImage.dptr[0], &rcbImage.pitch[0], rcbProperties.width * dwSizeOf(rcbProperties.pxlType), rcbProperties.height * rcbProperties.planeCount);
         rcbImage.pitch[1] = rcbImage.pitch[2] = rcbImage.pitch[0];
         rcbImage.dptr[1] = reinterpret_cast<uint8_t*>(rcbImage.dptr[0]) + rcbProperties.height * rcbImage.pitch[0];
         rcbImage.dptr[2] = reinterpret_cast<uint8_t*>(rcbImage.dptr[1]) + rcbProperties.height * rcbImage.pitch[1];
@@ -384,6 +378,8 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
         dwSoftISP_bindDemosaicOutput(&rcbImage, pipelineRCCB);
         rgbaImageProperties = rcbProperties;
     }
+
+    cout << "Camera image with " << rgbaImageProperties.width << "x" << rgbaImageProperties.height << " at " << cameraProps->framerate << " FPS" << endl;
 
     //RGBA image to display
     rgbaImageProperties.pxlFormat         = DW_IMAGE_RGBA;
