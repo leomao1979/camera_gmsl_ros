@@ -85,12 +85,14 @@
  
 #include <ros/ros.h>
 #include "LMImagePublisher.hpp"
-#include "LMCompressedImagePublisher.hpp"
 
 using namespace std;
 using namespace dw_samples::common;
 typedef std::chrono::high_resolution_clock myclock_t;
 typedef std::chrono::time_point<myclock_t> timepoint_t;
+
+static const string ROS_TOPIC_IMAGE             = "/camera/image";
+static const string ROS_TOPIC_IMAGE_COMPRESSED  = "/camera/image/compressed";
 
 //------------------------------------------------------------------------------
 // Variables
@@ -118,6 +120,7 @@ ProgramArguments g_arguments(
         ProgramArguments::Option_t("serializer-type", "raw"),
         ProgramArguments::Option_t("slave", "0"),
         ProgramArguments::Option_t("fifo-size", "3"),
+        ProgramArguments::Option_t("ros-topic", ""),
     });
 
 //------------------------------------------------------------------------------
@@ -137,8 +140,7 @@ void keyPressCallback(int key);
 
 void initGPUJpegEncoder(struct gpujpeg_encoder **rgba2rgbConverter, const dwImageProperties& rgbaImageProperties);
 void initConverter(GenericSimpleFormatConverter **rgba2rgbConverter, const dwImageProperties& rgbaImageProperties, dwContextHandle_t context);
-void publish_image(LMImagePublisher *publisher, const ros::Time& stamp, const dwImageCUDA& rgbaImage);
-void publish_image(LMCompressedImagePublisher *publisher, const ros::Time& stamp, struct gpujpeg_encoder* encoder, const dwImageCUDA& rgbaImage);
+void publish_image(LMImagePublisher *publisher, const ros::Time& stamp, struct gpujpeg_encoder* encoder, const dwImageCUDA& rgbaImage);
 
 //------------------------------------------------------------------------------
 int main(int argc, const char **argv)
@@ -294,8 +296,8 @@ void initSensors(dwSALHandle_t *sal, dwSensorHandle_t *camera, dwImageProperties
     result = dwSAL_createSensor(camera, params, *sal);
     if (result != DW_SUCCESS) {
         std::cerr << "Cannot create driver: camera.gmsl with params: "
-                    << params.parameters << std::endl
-                    << "Error: " << dwGetStatusName(result) << std::endl;
+                  << params.parameters << std::endl
+                  << "Error: " << dwGetStatusName(result) << std::endl;
         exit(1);
     }
 
@@ -304,8 +306,7 @@ void initSensors(dwSALHandle_t *sal, dwSensorHandle_t *camera, dwImageProperties
                                     *camera);
     dwSensorCamera_getSensorProperties(cameraProperties, *camera);
 
-    std::cout << "Camera image with " << cameraImageProperties->width << "x" << cameraImageProperties->height
-              << " at " << cameraProperties->framerate << " FPS" << std::endl;
+    std::cout << "Camera image with " << cameraImageProperties->width << "x" << cameraImageProperties->height << " at " << cameraProperties->framerate << " FPS" << std::endl;
 }
 
 //------------------------------------------------------------------------------
@@ -415,12 +416,21 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
 
     result = dwImageStreamer_initialize(&cuda2gl, &glProperties, DW_IMAGE_GL, sdk);
     if (result == DW_SUCCESS) {
-        LMImagePublisher *publisher = new LMImagePublisher("/camera/image");
-        // LMCompressedImagePublisher *publisher = new LMCompressedImagePublisher("/camera/image_compressed");
+        bool compress_mode = false;
+        string rosTopic = g_arguments.get("ros-topic");
+        if (rosTopic.find(ROS_TOPIC_IMAGE_COMPRESSED) == 0) {
+            compress_mode = true; 
+        } else if (rosTopic.empty()) {
+            rosTopic = ROS_TOPIC_IMAGE; 
+        }
+        LMImagePublisher *publisher = new LMImagePublisher(rosTopic, compress_mode);
+        struct gpujpeg_encoder *encoder = nullptr;
+        if (compress_mode) {
+            initGPUJpegEncoder(&encoder, rgbaImageProperties);
+        }
+
         GenericSimpleFormatConverter *converter = nullptr;
         initConverter(&converter, rgbaImageProperties, sdk);
-        struct gpujpeg_encoder *encoder = NULL;
-        initGPUJpegEncoder(&encoder, rgbaImageProperties);
 
         while (g_run && !window->shouldClose()) {
             std::this_thread::yield();
@@ -457,7 +467,7 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
             }
             ros::Time stamp = ros::Time::now();
 
-            std::cout << "Exposure Time (s): " << rawImageNvMedia->prop.meta.exposureTime << std::endl;
+            // std::cout << "Exposure Time (s): " << rawImageNvMedia->prop.meta.exposureTime << std::endl;
 
             if (recordCamera)
                 dwSensorSerializer_serializeCameraFrameAsync(frameHandle, serializer);
@@ -478,8 +488,7 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
             if (g_RCCB) {
                 // Raw -> RCB directly
                 dwSoftISP_bindRawInput(rawImageCUDA, pipelineRCCB);
-                result = dwSoftISP_processDeviceAsync(DW_SOFT_ISP_PROCESS_TYPE_DEMOSAIC | DW_SOFT_ISP_PROCESS_TYPE_TONEMAP,
-                                                      pipelineRCCB);
+                result = dwSoftISP_processDeviceAsync(DW_SOFT_ISP_PROCESS_TYPE_DEMOSAIC | DW_SOFT_ISP_PROCESS_TYPE_TONEMAP, pipelineRCCB);
 
                 if (result != DW_SUCCESS) {
                     std::cerr << "Cannot run rccb pipeline: " << dwGetStatusName(result) << std::endl;
@@ -498,8 +507,7 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
             }
             // Publish RGB image to ROS
             dwImageCUDA* rgbImage = GenericImage::toDW<dwImageCUDA>(converter->convert(GenericImage::fromDW(&rgbaImage)));
-            publish_image(publisher, stamp, *rgbImage);
-            // publish_image(publisher, stamp, encoder, *rgbImage);
+            publish_image(publisher, stamp, encoder, *rgbImage);
 
             if (gTakeScreenshot) {
                 char fname[128];
@@ -630,52 +638,48 @@ void initConverter(GenericSimpleFormatConverter **rgba2rgbConverter, const dwIma
 }
 
 //-----------------------------------------------------------------------------
-void publish_image(LMImagePublisher *publisher, const ros::Time& stamp, const dwImageCUDA& rgbImage) {
-    std::vector<uint8_t> cpuData;
-    cpuData.resize(rgbImage.prop.width * rgbImage.prop.height * 3);
-    cudaMemcpy2D(cpuData.data(), rgbImage.prop.width*3, rgbImage.dptr[0], rgbImage.pitch[0], rgbImage.prop.width*3, rgbImage.prop.height, cudaMemcpyDeviceToHost);
+void publish_image(LMImagePublisher *publisher, const ros::Time& stamp, struct gpujpeg_encoder* encoder, const dwImageCUDA& rgbImage) {
+    if (encoder == nullptr) {
+        std::vector<uint8_t> cpuData;
+        cpuData.resize(rgbImage.prop.width * rgbImage.prop.height * 3);
+        cudaMemcpy2D(cpuData.data(), rgbImage.prop.width*3, rgbImage.dptr[0], rgbImage.pitch[0], rgbImage.prop.width*3, rgbImage.prop.height, cudaMemcpyDeviceToHost);
 
-    publisher->publish(cpuData.data(), stamp, rgbImage.prop.width, rgbImage.prop.height);
-}
+        publisher->publish_image(cpuData.data(), stamp, rgbImage.prop.width, rgbImage.prop.height);
+    } else {
+        // Compress with lodepng
+        // std::vector<uint8_t> cpuData;
+        // cpuData.resize(rgbImage.prop.width * rgbImage.prop.height * 3);
+        // cudaMemcpy2D(cpuData.data(), rgbImage.prop.width*3, rgbImage.dptr[0], rgbImage.pitch[0], rgbImage.prop.width*3, rgbImage.prop.height, cudaMemcpyDeviceToHost);
+        // unsigned char* compressed_image = NULL;
+        // size_t compressed_image_size = 0;
+        // lodepng_encode24(&compressed_image, &compressed_image_size, cpuData.data(), rgbImage.prop.width, rgbImage.prop.height);
 
-//-----------------------------------------------------------------------------
-void publish_image(LMCompressedImagePublisher *publisher, const ros::Time& stamp, struct gpujpeg_encoder* encoder, const dwImageCUDA& rgbImage) {
-/**
-    // Compress with lodepng
-    std::vector<uint8_t> cpuData;
-    cpuData.resize(rgbImage.prop.width * rgbImage.prop.height * 3);
-    cudaMemcpy2D(cpuData.data(), rgbImage.prop.width*3, rgbImage.dptr[0], rgbImage.pitch[0], rgbImage.prop.width*3, rgbImage.prop.height, cudaMemcpyDeviceToHost);
+        // Compress with libgpujpeg
+        uint8_t* compressed_image = nullptr;
+        int compressed_image_size = 0;
+        timepoint_t t0 = myclock_t::now();
+        struct gpujpeg_encoder_input encoder_input;
+        gpujpeg_encoder_input_set_image(&encoder_input, reinterpret_cast<uint8_t*>(rgbImage.dptr[0]));
+        int retcode = gpujpeg_encoder_encode(encoder, &encoder_input, &compressed_image, &compressed_image_size, true);
+        if (retcode != 0) {
+            cerr << "Failed to encode. Error code: " << retcode << endl;
+            return;
+        }
+        timepoint_t t1 = myclock_t::now();
+        cout << "Image size: " << rgbImage.prop.width * rgbImage.prop.height * 3 << "; Compressed size: " << compressed_image_size << endl;
 
-    unsigned char* compressed_image = NULL;
-    size_t compressed_image_size = 0;
-    lodepng_encode24(&compressed_image, &compressed_image_size, cpuData.data(), rgbImage.prop.width, rgbImage.prop.height);
-*/
-    // Compress with libgpujpeg
-    uint8_t* compressed_image = NULL;
-    int compressed_image_size = 0;
-    timepoint_t t0 = myclock_t::now();
-    struct gpujpeg_encoder_input encoder_input;
-    gpujpeg_encoder_input_set_image(&encoder_input, reinterpret_cast<uint8_t*>(rgbImage.dptr[0]));
-    int retcode = gpujpeg_encoder_encode(encoder, &encoder_input, &compressed_image, &compressed_image_size, true);
-    if (retcode != 0) {
-        cerr << "Failed to encode. Ret code: " << retcode << endl;
-        return;
+        static bool jpeg_saved = false;
+        if (!jpeg_saved) {
+            gpujpeg_image_save_to_file("encoded_image.jpg", compressed_image, compressed_image_size);
+            jpeg_saved = true;
+        }
+
+        publisher->publish_compressed_image(compressed_image, stamp, "jpeg", compressed_image_size);
+
+        timepoint_t t2 = myclock_t::now();
+        std::chrono::milliseconds encoding_time = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
+        cout << "Encoding time: " << std::to_string(encoding_time.count()) << endl;
+
+        // free(compressed_image);
     }
-    timepoint_t t1 = myclock_t::now();
-    std::cout << "Original image size: " << rgbImage.prop.width * rgbImage.prop.height * 3 << "; Compressed image size: " << compressed_image_size << std::endl;
-
-    static bool jpeg_saved = false;
-    if (!jpeg_saved) {
-        gpujpeg_image_save_to_file("encoded_image.jpg", compressed_image, compressed_image_size);
-        jpeg_saved = true;
-    }
-
-    publisher->publish(compressed_image, stamp, "jpeg", compressed_image_size);
-
-    timepoint_t t2 = myclock_t::now();
-    std::chrono::milliseconds encoding_time = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
-    std::chrono::milliseconds publish_time = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-    std::cout << "Encoding time: " << std::to_string(encoding_time.count()) << "; Publish time: " << std::to_string(publish_time.count()) << std::endl;
-
-//    free(compressed_image);
 }

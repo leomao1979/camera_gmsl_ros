@@ -77,7 +77,6 @@ endforeach()
 set(SOURCES
     src/main.cpp
     src/LMImagePublisher.cpp
-    src/LMCompressedImagePublisher.cpp
 )
 
 set(LIBRARIES
