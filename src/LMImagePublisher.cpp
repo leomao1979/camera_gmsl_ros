@@ -53,7 +53,7 @@ void LMImagePublisher::publish_compressed_image(uint8_t* data, const ros::Time& 
     c_img_msg.header = header;
     c_img_msg.format = format;
     c_img_msg.data.resize(size);
-    memcpy(c_img_msg.data.data(), compressed_image, size);
+    memcpy(c_img_msg.data.data(), data, size);
     // publish to ros
     m_pub.publish(c_img_msg);
 }

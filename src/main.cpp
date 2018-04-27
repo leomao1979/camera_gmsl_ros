@@ -418,6 +418,7 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
     if (result == DW_SUCCESS) {
         bool compress_mode = false;
         string rosTopic = g_arguments.get("ros-topic");
+        cout << "rosTopic: " << rosTopic << endl;
         if (rosTopic.find(ROS_TOPIC_IMAGE_COMPRESSED) == 0) {
             compress_mode = true; 
         } else if (rosTopic.empty()) {
@@ -559,7 +560,9 @@ void runNvMedia_pipeline(WindowBase *window, dwRendererHandle_t renderer, dwSens
         }
         dwImageStreamer_release(&cuda2gl);
         delete converter;
-        gpujpeg_encoder_destroy(encoder);
+        if (encoder != nullptr) {
+            gpujpeg_encoder_destroy(encoder);
+        }
     } else {
         std::cerr << "Cannot create CUDA -> GL streamer" << std::endl;
     }
@@ -655,9 +658,9 @@ void publish_image(LMImagePublisher *publisher, const ros::Time& stamp, struct g
         // lodepng_encode24(&compressed_image, &compressed_image_size, cpuData.data(), rgbImage.prop.width, rgbImage.prop.height);
 
         // Compress with libgpujpeg
+        timepoint_t t0 = myclock_t::now();
         uint8_t* compressed_image = nullptr;
         int compressed_image_size = 0;
-        timepoint_t t0 = myclock_t::now();
         struct gpujpeg_encoder_input encoder_input;
         gpujpeg_encoder_input_set_image(&encoder_input, reinterpret_cast<uint8_t*>(rgbImage.dptr[0]));
         int retcode = gpujpeg_encoder_encode(encoder, &encoder_input, &compressed_image, &compressed_image_size, true);
@@ -665,20 +668,12 @@ void publish_image(LMImagePublisher *publisher, const ros::Time& stamp, struct g
             cerr << "Failed to encode. Error code: " << retcode << endl;
             return;
         }
-        timepoint_t t1 = myclock_t::now();
-        cout << "Image size: " << rgbImage.prop.width * rgbImage.prop.height * 3 << "; Compressed size: " << compressed_image_size << endl;
-
-        static bool jpeg_saved = false;
-        if (!jpeg_saved) {
-            gpujpeg_image_save_to_file("encoded_image.jpg", compressed_image, compressed_image_size);
-            jpeg_saved = true;
-        }
+        std::chrono::milliseconds encoding_time = std::chrono::duration_cast<std::chrono::milliseconds>(myclock_t::now() - t0);
+        cout << "Image size: " << rgbImage.prop.width * rgbImage.prop.height * 3 
+             << "; Compressed size: " << compressed_image_size 
+             << "; Encoding time: " << std::to_string(encoding_time.count()) << "ms" << endl;
 
         publisher->publish_compressed_image(compressed_image, stamp, "jpeg", compressed_image_size);
-
-        timepoint_t t2 = myclock_t::now();
-        std::chrono::milliseconds encoding_time = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
-        cout << "Encoding time: " << std::to_string(encoding_time.count()) << endl;
 
         // free(compressed_image);
     }
