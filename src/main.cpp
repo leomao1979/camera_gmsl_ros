@@ -121,6 +121,7 @@ ProgramArguments g_arguments(
         ProgramArguments::Option_t("slave", "0"),
         ProgramArguments::Option_t("fifo-size", "3"),
         ProgramArguments::Option_t("ros-topic", ""),
+        ProgramArguments::Option_t("node-name", ""),
         ProgramArguments::Option_t("offscreen", "false"),
     });
 
@@ -195,7 +196,12 @@ int main(int argc, const char **argv)
     sensorData.bottom.bufferSize = MAX_EMBED_DATA_SIZE;
 
     float32_t framerate = cameraProps.framerate;
-    ros::init(argc, const_cast<char **>(argv), "gmsl_camera_image_publisher");
+    string nodeName = g_arguments.get("node-name");
+    if (nodeName == "") {
+        nodeName = "gmsl_camera_image_publisher"; 
+    }
+    cout << "nodeName: " << nodeName << endl;
+    ros::init(argc, const_cast<char **>(argv), nodeName);
     runNvMedia_pipeline(window, renderer, cameraSensor, &rawImageProps, &cameraProps, sdk, framerate);
 
     dwRenderer_release(&renderer);
