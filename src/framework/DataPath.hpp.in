@@ -27,8 +27,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_DATAPATH_HPP__
-#define SAMPLES_COMMON_DATAPATH_HPP__
+#ifndef SAMPLES_FRAMEWORK_DATAPATH_HPP_
+#define SAMPLES_FRAMEWORK_DATAPATH_HPP_
 
 #include <string>
 
@@ -46,4 +46,4 @@ class DataPath
     }
 };
 
-#endif // SAMPLES_COMMON_DATAPATH_HPP__
+#endif // SAMPLES_FRAMEWORK_DATAPATH_HPP_

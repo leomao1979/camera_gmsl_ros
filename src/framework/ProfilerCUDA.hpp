@@ -232,6 +232,9 @@ public:
         //       The sync must be commented in master but you may uncomment it to profile and compare.
         //cudaDeviceSynchronize();
         m_profiler->tic(sectionKey, isTopLevel);
+#else
+        (void) sectionKey;
+        (void) isTopLevel;
 #endif
     }
     ProfileCUDASection(ProfilerCUDA *profiler, const std::string &sectionKey)

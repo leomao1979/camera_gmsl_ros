@@ -3,9 +3,10 @@
 #-------------------------------------------------------------------------------
 # Debug symbols
 #-------------------------------------------------------------------------------
-# Force debug symbols on experimental builds to have stack trace
+# Enable minimal (level 1) debug info on experimental builds for
+# informative stack trace including function names
 if(SDK_BUILD_EXPERIMENTAL AND NOT CMAKE_BUILD_TYPE MATCHES Debug)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g1")
 endif()
 
 #-------------------------------------------------------------------------------
@@ -33,21 +34,10 @@ endif()
 #-------------------------------------------------------------------------------
 find_package(Threads REQUIRED)
 
-if(LINUX)
-    find_package(X11 REQUIRED)
-    if (NOT X11_Xrandr_FOUND)
-        message(FATAL_ERROR "Missing X11_Xrandr library")
-    endif()
-    if (NOT X11_Xcursor_FOUND)
-        message(FATAL_ERROR "Missing X11_Xcursor library")
-    endif()
-    if (NOT X11_xf86vmode_FOUND)
-        message(FATAL_ERROR "Missing X11_xf86vmode library")
-    endif()
-    if (NOT X11_Xinerama_FOUND)
-        message(FATAL_ERROR "Missing X11_Xinerama library")
-    endif()
-    if (NOT X11_Xi_FOUND)
-        message(FATAL_ERROR "Missing X11_Xi library")
-    endif()
+#-------------------------------------------------------------------------------
+# Profiling
+#-------------------------------------------------------------------------------
+if (CMAKE_BUILD_TYPE MATCHES "Profile")
+    add_definitions(-DDW_PROFILING)
+    set(DW_PROFILING TRUE)
 endif()

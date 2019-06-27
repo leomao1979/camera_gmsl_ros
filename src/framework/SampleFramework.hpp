@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_SAMPLEFRAMEWORK_HPP__
-#define SAMPLES_COMMON_SAMPLEFRAMEWORK_HPP__
+#ifndef SAMPLES_COMMON_SAMPLEFRAMEWORK_HPP_
+#define SAMPLES_COMMON_SAMPLEFRAMEWORK_HPP_
 
 
 
@@ -52,13 +52,7 @@
 
 
 #include "Checks.hpp"
-
 #include "WindowGLFW.hpp"
-#ifdef VIBRANTE
-#include "WindowEGL.hpp"
-#else
-#endif
-
 #include "ProgramArguments.hpp"
 #include "Log.hpp"
 
@@ -76,6 +70,7 @@ extern void (*gUserKeyPressCallback)(int);
 extern ProgramArguments gArguments;
 extern WindowBase *gWindow;
 extern bool gRun;
+extern bool gPause;
 
 //------------------------------------------------------------------------------
 // Functions
@@ -85,7 +80,7 @@ extern bool gRun;
 void sig_int_handler(int sig);
 
 // key press event
-void keyPressCallback(int key);
+void keyPressCallback(int key, int scancode, int action, int mods);
 
 // draw box
 // Required renderbuffer with the following properties:
@@ -110,9 +105,11 @@ void drawBoxesWithLabels(const std::vector<std::pair<dwBox2D, std::string> > &bo
 bool initSampleApp(int argc, const char **argv,
                    const ProgramArguments* arguments,
                    void (*userKeyPressCallback)(int),
-                   uint32_t width, uint32_t height);
+                   uint32_t width, uint32_t height,
+                   bool offscreen = false,
+                   int samples = 0);
 
 void releaseSampleApp();
 
 
-#endif // SAMPLES_COMMON_SAMPLEFRAMEWORK_HPP__
+#endif // SAMPLES_COMMON_SAMPLEFRAMEWORK_HPP_

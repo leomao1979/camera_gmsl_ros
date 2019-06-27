@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
 # Set basic configurations
 #-------------------------------------------------------------------------------
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-set(CMAKE_BUILD_TYPE Debug)
+#set(CMAKE_BUILD_TYPE Debug)
 include(SamplesSetBuildType) # Set the build type before project is created
 set(SDK_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(SDK_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
@@ -18,7 +18,6 @@ project(camera_gmsl_raw_ros C CXX)
 # System packages
 #-------------------------------------------------------------------------------
 find_package(CUDA REQUIRED)
-find_package(Threads REQUIRED)
 
 #-------------------------------------------------------------------------------
 # Basic configuration
@@ -36,9 +35,9 @@ find_package(Driveworks REQUIRED)
 include_directories(${Driveworks_INCLUDE_DIR})
 list(APPEND Driveworks_LIBRARIES ${CUDA_LIBRARIES} ${CUDA_cublas_LIBRARY})
 if(LINUX)
-    list(APPEND Driveworks_LIBRARIES ${CMAKE_THREAD_LIBS_INIT} dl rt)
+    list(APPEND Driveworks_LIBRARIES)
 elseif(VIBRANTE)
-    list(APPEND Driveworks_LIBRARIES ${vibrante_LIBRARIES} ${vibrante_Xlibs_LIBRARIES} nvmedia ${EGL_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+    list(APPEND Driveworks_LIBRARIES ${vibrante_LIBRARIES} ${vibrante_Xlibs_LIBRARIES} nvmedia ${EGL_LIBRARIES})
 endif()
 
 #-------------------------------------------------------------------------------
@@ -66,10 +65,7 @@ include_directories(${SDK_BINARY_DIR}/configured/samples)
 configure_file(src/framework/DataPath.hpp.in
                ${SDK_BINARY_DIR}/configured/samples/framework/DataPath.hpp)
 
-set(SAMPLES framework)
-foreach(SAMPLE ${SAMPLES})
-    add_subdirectory(src/${SAMPLE})
-endforeach()
+add_subdirectory(src/framework)
 
 #-------------------------------------------------------------------------------
 # Project files
@@ -83,7 +79,7 @@ set(LIBRARIES
     glfw
     dw_samples_framework
     ${Driveworks_LIBRARIES}
-    lodepng
+    lodepng-src
     gpujpeg
     ${catkin_LIBRARIES}
 )
@@ -117,7 +113,7 @@ set_property(TARGET update_cuda_deps PROPERTY FOLDER "Support")
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-  LIBRARIES camera_gmsl_raw
+#  LIBRARIES camera_gmsl_raw
   CATKIN_DEPENDS cv_bridge image_transport roscpp rospy sensor_msgs std_msgs
 #  DEPENDS system_lib
 )

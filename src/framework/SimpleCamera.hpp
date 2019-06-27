@@ -28,15 +28,14 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef COMMON_SIMPLECAMERA_HPP__
-#define COMMON_SIMPLECAMERA_HPP__
+#ifndef COMMON_SIMPLECAMERA_HPP_
+#define COMMON_SIMPLECAMERA_HPP_
 
 // Driveworks
 #include <dw/core/Context.h>
 #include <dw/sensors/Sensors.h>
 #include <dw/sensors/camera/Camera.h>
 #include <dw/image/Image.h>
-#include <dw/image/FormatConverter.h>
 #include <dw/isp/SoftISP.h>
 
 // C++ Std
@@ -49,7 +48,6 @@
 // Common
 #include <framework/Checks.hpp>
 #include <framework/SimpleStreamer.hpp>
-#include <framework/SimpleFormatConverter.hpp>
 
 namespace dw_samples
 {
@@ -80,13 +78,13 @@ class SimpleCamera
   public:
     /// creates a simple camera that outputs a frame with the properties of the camera image
     SimpleCamera(const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx,
-                 dwCameraOutputType outputType = DW_CAMERA_PROCESSED_IMAGE);
+                 dwCameraOutputType outputType = DW_CAMERA_OUTPUT_NATIVE_PROCESSED);
     /**
      * creates a simple camera and also sets up image streamer and format converter to output a
      * converted image, with properties different from the properties of the camera image
     **/
     SimpleCamera(const dwImageProperties &outputProperties, const dwSensorParams &params, dwSALHandle_t sal,
-                 dwContextHandle_t ctx, dwCameraOutputType outputType = DW_CAMERA_PROCESSED_IMAGE);
+                 dwContextHandle_t ctx, dwCameraOutputType outputType = DW_CAMERA_OUTPUT_NATIVE_PROCESSED);
 
     virtual ~SimpleCamera();
 
@@ -100,13 +98,8 @@ class SimpleCamera
     const dwImageProperties &getImageProperties() const { return m_imageProperties; }
     virtual const dwImageProperties &getOutputProperties() const {return m_outputProperties;}
 
-    virtual dwImageGeneric *readFrame();
+    virtual dwImageHandle_t readFrame();
 
-    template <class T>
-    T *readFrameTyped()
-    {
-        return GenericImage::toDW<T>(readFrame());
-    }
 
     /// Releases the frame returned by readFrame. Calling this is optional.
     void releaseFrame();
@@ -121,11 +114,11 @@ class SimpleCamera
 
     /// Returns the frame converted to RGBA format of the same type as the input image
     /// Only valid when GL output has been enabled
-    dwImageGeneric *getFrameRgba() const {return m_pendingFrameRgba;}
+    dwImageHandle_t getFrameRgba() const {return m_pendingFrameRgba;}
 
     /// Returns the frame converted to RGBA format as a GL frame
     /// Only valid when GL output has been enabled
-    dwImageGL *getFrameRgbaGL() const {return m_pendingFrameRgbaGL;}
+    dwImageHandle_t getFrameRgbaGL() const {return m_pendingFrameRgbaGL;}
 
 protected:
     dwContextHandle_t m_ctx;
@@ -137,21 +130,23 @@ protected:
     dwImageProperties m_imageProperties;
     dwImageProperties m_outputProperties;
 
-    std::unique_ptr<GenericSimpleImageStreamer> m_streamer;
-    std::unique_ptr<GenericSimpleFormatConverter> m_converter;
+    std::unique_ptr<SimpleImageStreamer<>> m_streamer;
+    dwImageHandle_t m_converter;
 
     dwCameraFrameHandle_t m_pendingFrame;
 
     dwCameraOutputType m_outputType;
 
-    std::unique_ptr<GenericSimpleFormatConverter> m_converterRgba;
-    std::unique_ptr<GenericSimpleImageStreamer> m_streamerGL;
-    dwImageGeneric *m_pendingFrameRgba;
-    dwImageGL *m_pendingFrameRgbaGL;
+    dwImageHandle_t m_converterRgba;
+    std::unique_ptr<SimpleImageStreamer<>> m_streamerGL;
+    dwImageHandle_t m_pendingFrameRgba;
+    dwImageHandle_t m_pendingFrameRgbaGL;
+
+    bool m_started;
 };
 
 /**
- * Extention of the SimpleCamera that reads a RAW image and applies the raw pipeline. Calling readFrame will
+ * Extension of the SimpleCamera that reads a RAW image and applies the raw pipeline. Calling readFrame will
  * a RCB/RCC frame.
  *
  * NOTE for tutorial and details about raw pipeline and raw cameras, see sample_camera_gmsl_raw and sample_raw_pipeline
@@ -159,17 +154,32 @@ protected:
 class RawSimpleCamera : public SimpleCamera
 {
 public:
-    RawSimpleCamera(const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx, cudaStream_t stream, dwCameraOutputType outputType);
+    RawSimpleCamera(const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx, cudaStream_t stream, 
+    		dwCameraOutputType outputType, dwSoftISPDemosaicMethod demosaicMethod = DW_SOFTISP_DEMOSAIC_METHOD_DOWNSAMPLE);
+    
+    RawSimpleCamera(const dwImageFormat &outputISPFormat, const dwSensorParams &params, dwSALHandle_t sal,
+                    dwContextHandle_t ctx, cudaStream_t stream, dwCameraOutputType outputType,
+                    dwSoftISPDemosaicMethod demosaicMethod = DW_SOFTISP_DEMOSAIC_METHOD_DOWNSAMPLE);
+
+    /**
+     * Creates a raw simple camera and also sets up format converter to output a
+     * converted image, with properties different from the properties of the camera image
+     * Note, the output resolution depends on the demosaicMethod.
+    **/
+    RawSimpleCamera(const dwImageProperties &outputProperties, const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx, cudaStream_t stream, 
+    		dwCameraOutputType outputType, dwSoftISPDemosaicMethod demosaicMethod);
+
     ~RawSimpleCamera();
 
-    dwImageGeneric *readFrame() override final;
+    dwImageHandle_t readFrame() override final;
 
     virtual const dwImageProperties &getOutputProperties() const override final {return m_rawOutputProperties;}
 private :
     dwSoftISPHandle_t m_softISP;
-    dwImageCUDA m_RCBImage, m_RGBImage;
+    dwImageHandle_t m_RCBImage, m_RGBImage;
 
     dwImageProperties m_rawOutputProperties;
+    dwImageHandle_t m_converter_final;
 
     bool m_doTonemap;
 };

@@ -28,12 +28,13 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_MATHUTILS_HPP__
-#define SAMPLES_COMMON_MATHUTILS_HPP__
+#ifndef SAMPLES_COMMON_MATHUTILS_HPP_
+#define SAMPLES_COMMON_MATHUTILS_HPP_
 
 #include <math.h>
+#include <algorithm>
 #include <dw/core/Types.h>
-
+#include <fstream>
 
 #define DEG2RAD(x) (static_cast<float>(x) * 0.01745329251994329575f)
 #define RAD2DEG(x) (static_cast<float>(x) * 57.29577951308232087721f)
@@ -55,8 +56,10 @@ void ortho(float M[16], const float l, const float r, const float b, const float
 void ortho(float M[16], float fovy, float aspect, float n, float f);
 
 void quaternionToRotationMatrix(float rotation[16], const float quaternion[4]);
+void quaternionToRotationMatrix(dwMatrix3d& mat, const float64_t* quat);
 void positionToTranslateMatrix(float translate[16], const float position[3]);
-void quaternionToEulerianAngle(float32_t q[4], float32_t& roll, float32_t& pitch, float32_t& yaw);
+void rotationToTransformMatrix(float transform[16], const float rotation[9]);
+void quaternionToEulerianAngle(const float32_t q[4], float32_t& roll, float32_t& pitch, float32_t& yaw);
 
 
 dwVector3f pos2DTo3D(const dwVector2f &in);
@@ -67,4 +70,49 @@ dwVector2f pos3DTo2D(const dwVector3f &in);
 **/
 dwVector2f focalFromFOV(const dwVector2f fov, dwVector2ui imageSize);
 
-#endif // SAMPLES_COMMON_MATHUTILS_HPP__
+//------------------------------------------------------------------------------
+// This is a wrapped around the Mat4.hpp ::  Mat4_AxB for easy usage.
+// Returns a * b
+dwTransformation operator*(const dwTransformation& a, const dwTransformation& b);
+
+//------------------------------------------------------------------------------
+// This is a wrapped around the Mat4.hpp ::  Mat4_AxB for easy usage.
+// Sets a -> a * b
+dwTransformation& operator*=(dwTransformation& a, const dwTransformation& b);
+
+//------------------------------------------------------------------------------
+// Transform point by transformation matrix
+dwVector4f operator*(const dwTransformation& T, const dwVector4f& p);
+
+//------------------------------------------------------------------------------
+// This is a wrapped around the Mat4.hpp ::  Mat4_AxBinv for easy usage.
+// Returns a * inv(b)
+dwTransformation operator/(const dwTransformation& a, const dwTransformation& b);
+
+//------------------------------------------------------------------------------
+// This is a wrapped around the Mat4.hpp ::  Mat4_AxBinv for easy usage.
+// Sets a -> a * inv(b)
+dwTransformation& operator/=(dwTransformation& a, const dwTransformation& b);
+
+//------------------------------------------------------------------------------
+// Pretty printer for a dwTransformation object.
+std::ostream& operator << (std::ostream& o, const dwTransformation& tx);
+
+//------------------------------------------------------------------------------
+// Returns the magnitude of the translation of T
+float32_t getTranslationMagnitude(const dwTransformation &T);
+
+//------------------------------------------------------------------------------
+// Returns the magnitude of the rotation of T, as used in angle/axis representation
+// It is computed as acos( (trace(R) - 1) / 2)
+float32_t getRotationMagnitude(const dwTransformation &T);
+
+//------------------------------------------------------------------------------
+// Returns the rotation matrix based on roll, pitch and yaw in degrees
+void getRotationMatrix(dwMatrix3f *R, float32_t rollInDegrees, float32_t pitchInDegrees, float32_t yawInDegrees);
+
+//------------------------------------------------------------------------------
+// Returns the homography matrix based on the input camera transformation matrix, output camera rotation and translation matrix
+void computeHomography(dwMatrix3f* homographyOut, dwTransformation transformationIn, dwMatrix3f camOutRotationMatrix, float32_t camOutTranslation[], float32_t normal[], float32_t distanceToPlane);
+
+#endif // SAMPLES_COMMON_MATHUTILS_HPP_

@@ -39,8 +39,10 @@
 #endif
 
 // -----------------------------------------------------------------------------
-WindowGLFW::WindowGLFW(const char* title, int width, int height, bool invisible)
+WindowGLFW::WindowGLFW(const char* title, int width, int height, bool offscreen, int samples,
+                       bool initInvisible)
     : WindowBase(width, height)
+    , m_offscreen(offscreen)
 #ifdef VIBRANTE
     , m_display(EGL_NO_DISPLAY)
     , m_context(EGL_NO_CONTEXT)
@@ -53,12 +55,17 @@ WindowGLFW::WindowGLFW(const char* title, int width, int height, bool invisible)
 
     // Create a windowed mode window and its OpenGL context
     glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
-    glfwWindowHint(GLFW_SAMPLES, 0);     // Disable MSAA
-    glfwWindowHint(GLFW_DEPTH_BITS, 24); // Enable
+    glfwWindowHint(GLFW_SAMPLES, samples); // 0 disables MSAA
+    glfwWindowHint(GLFW_DEPTH_BITS, 24);   // Enable
 
-    if (invisible) {
-         glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
+    // GLFW_VISIBLE can be used to avoid showing blank window when app is doing initialization.
+    if (offscreen || initInvisible) {
+        glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
     }
+
+#ifdef VIBRANTE
+    glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API); // Enable EGL as context on Vibrante
+#endif
 
 #ifdef _GLESMODE
     glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
@@ -69,6 +76,11 @@ WindowGLFW::WindowGLFW(const char* title, int width, int height, bool invisible)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 #endif
+
+    if (title == nullptr) {
+        glfwWindowHint(GLFW_DECORATED, GL_FALSE);
+        title = "";
+    }
 
     m_hWindow = glfwCreateWindow(width, height, title, NULL, NULL);
 
@@ -108,6 +120,10 @@ WindowGLFW::WindowGLFW(const char* title, int width, int height, bool invisible)
     glfwSetMouseButtonCallback(m_hWindow, [](GLFWwindow *win, int button, int action, int mods) {
         WindowGLFW *window = reinterpret_cast<WindowGLFW *>(glfwGetWindowUserPointer(win));
         window->onMouseButtonCallback(button, action, mods);
+    });
+    glfwSetCharModsCallback(m_hWindow, [](GLFWwindow *win, uint32_t codepoint, int32_t mods) {
+        WindowGLFW *window = reinterpret_cast<WindowGLFW *>(glfwGetWindowUserPointer(win));
+        window->onCharModsCallback(codepoint, mods);
     });
     glfwSetCursorPosCallback(m_hWindow, [](GLFWwindow *win, double x, double y) {
         WindowGLFW *window = reinterpret_cast<WindowGLFW *>(glfwGetWindowUserPointer(win));
@@ -166,36 +182,41 @@ EGLContext WindowGLFW::getEGLContext(void)
 }
 
 // -----------------------------------------------------------------------------
+/*virtual*/
 void WindowGLFW::onKeyCallback(int key, int scancode, int action, int mods)
 {
-    if (!m_keyPressCallback)
+    if (action == GLFW_RELEASE && m_keyUpCallback)
+        m_keyUpCallback(key, scancode, mods);
+    else if (action == GLFW_PRESS && m_keyDownCallback)
+        m_keyDownCallback(key, scancode, mods);
+    else if (action == GLFW_REPEAT && m_keyRepeatCallback)
+        m_keyRepeatCallback(key, scancode, mods);
+
+    if (!m_keyCallback)
         return;
 
-    (void)scancode;
-
-    if ((action == GLFW_PRESS || action == GLFW_REPEAT) && mods == 0)
-        m_keyPressCallback(key);
+    m_keyCallback(key, scancode, action, mods);
 }
 
 // -----------------------------------------------------------------------------
+/*virtual*/
 void WindowGLFW::onMouseButtonCallback(int button, int action, int mods)
 {
-    (void)mods;
-
     double x, y;
     glfwGetCursorPos(m_hWindow, &x, &y);
     if (action == GLFW_PRESS) {
         if (!m_mouseDownCallback)
             return;
-        m_mouseDownCallback(button, (float)x, (float)y);
+        m_mouseDownCallback(button, (float)x, (float)y, mods);
     } else if (action == GLFW_RELEASE) {
         if (!m_mouseUpCallback)
             return;
-        m_mouseUpCallback(button, (float)x, (float)y);
+        m_mouseUpCallback(button, (float)x, (float)y, mods);
     }
 }
 
 // -----------------------------------------------------------------------------
+/*virtual*/
 void WindowGLFW::onMouseMoveCallback(double x, double y)
 {
     if (!m_mouseMoveCallback)
@@ -204,6 +225,7 @@ void WindowGLFW::onMouseMoveCallback(double x, double y)
 }
 
 // -----------------------------------------------------------------------------
+/*virtual*/
 void WindowGLFW::onMouseWheelCallback(double dx, double dy)
 {
     if (!m_mouseWheelCallback)
@@ -212,6 +234,16 @@ void WindowGLFW::onMouseWheelCallback(double dx, double dy)
 }
 
 // -----------------------------------------------------------------------------
+/*virtual*/
+void WindowGLFW::onCharModsCallback(uint32_t codepoint, int32_t mods)
+{
+    if (!m_charModsCallback)
+        return;
+    m_charModsCallback(codepoint, mods);
+}
+
+// -----------------------------------------------------------------------------
+/*virtual*/
 void WindowGLFW::onResizeWindowCallback(int width, int height)
 {
     m_width  = width;
@@ -227,6 +259,13 @@ bool WindowGLFW::swapBuffers(void)
 {
     glfwPollEvents();
     glfwSwapBuffers(m_hWindow);
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+bool WindowGLFW::releaseContext()
+{
+    glfwMakeContextCurrent(nullptr);
     return true;
 }
 
@@ -287,5 +326,66 @@ bool WindowGLFW::setWindowSize(int width, int height)
 {
     // Set the window size
     glfwSetWindowSize(m_hWindow, width, height);
+
+    // it will take some time to enter SetFramebufferSize Callback.
+    // Preset the expected window size here. They will be re-writen in onResizeWindowCallback
+    m_width  = width;
+    m_height = height;
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+bool WindowGLFW::getDesktopResolution(int& width, int& height)
+{
+    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    
+    if (nullptr != mode) {
+        width  = mode->width;
+        height = mode->height;
+        return true;
+    } else {
+        width  = 1280;
+        height = 800;
+        return false;
+    }
+
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+bool WindowGLFW::setFullScreen()
+{
+    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+
+    glfwSetWindowMonitor(m_hWindow, glfwGetPrimaryMonitor(), 0, 0, mode->width, mode->height, mode->refreshRate);
+    m_width  = mode->width;
+    m_height = mode->height;
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+bool WindowGLFW::setWindowPosCentered()
+{
+    int width, height;
+    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    glfwGetWindowSize(m_hWindow, &width, &height);
+
+    if (width > mode->width || height > mode->height) {
+        return true;
+    }
+
+    glfwSetWindowPos(m_hWindow, (mode->width - width) / 2, (mode->height - height) / 2);
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+bool WindowGLFW::setWindowVisibility(bool visible)
+{
+    if (visible) {
+        glfwShowWindow(m_hWindow);
+    } else {
+        glfwHideWindow(m_hWindow);
+    }
+
     return true;
 }

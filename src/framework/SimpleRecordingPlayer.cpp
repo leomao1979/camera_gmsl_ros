@@ -47,6 +47,14 @@ void SimpleRecordingPlayer::restart()
     if(m_imuSensor)
         CHECK_DW_ERROR( dwSensor_reset(m_imuSensor) );
 
+    m_isPendingGPSMsgValid = false;
+    if (m_gpsSensor)
+        CHECK_DW_ERROR( dwSensor_reset(m_gpsSensor) );
+
+    m_isPendingLidarPacketValid = false;
+    if (m_lidarSensor)
+        CHECK_DW_ERROR( dwSensor_reset(m_lidarSensor) );
+
     for(auto &data : m_cameras)
     {
         data.camera->resetCamera();
@@ -108,6 +116,54 @@ void SimpleRecordingPlayer::stepForward()
         }
     }
 
+    if(!m_isPendingGPSMsgValid && m_gpsSensor != DW_NULL_HANDLE)
+    {
+        // Load GPS
+        result = dwSensorGPS_readFrame(&m_pendingGPSMsg, 100000, m_gpsSensor);
+        if (result == DW_SUCCESS)
+        {
+            m_isPendingGPSMsgValid = true;
+            if(m_pendingGPSMsg.timestamp_us == 0 && !isSingleSensorPlayback())
+                throw std::runtime_error("SimpleRecordingPlayer: GPS msg has no timestamp. Playback sync will not work.");
+        }
+        else if (result == DW_END_OF_STREAM)
+        {
+            std::cout << "GPS reached end of stream." << std::endl;
+            m_handler->handleEndOfStream();
+            return;
+        }
+        else
+        {
+            std::stringstream ss;
+            ss << "Terminating. Cannot read GPS frame: " << dwGetStatusName(result);
+            throw std::runtime_error(ss.str());
+        }
+    }
+
+    if(!m_isPendingLidarPacketValid && m_lidarSensor != DW_NULL_HANDLE)
+    {
+        // Load LIDAR
+        result = dwSensorLidar_readPacket(&m_pendingLidarPacket, 1000, m_lidarSensor);
+        if (result == DW_SUCCESS)
+        {
+            m_isPendingLidarPacketValid = true;
+            if(m_pendingLidarPacket->hostTimestamp == 0 && !isSingleSensorPlayback())
+                throw std::runtime_error("SimpleRecordingPlayer: Lidar packet has no timestamp. Playback sync will not work.");
+        }
+        else if (result == DW_END_OF_STREAM)
+        {
+            std::cout << "Lidar reached end of stream." << std::endl;
+            m_handler->handleEndOfStream();
+            return;
+        }
+        else
+        {
+            std::stringstream ss;
+            ss << "Terminating. Cannot read Lidar packet: " << dwGetStatusName(result);
+            throw std::runtime_error(ss.str());
+        }
+    }
+
     for(auto &data : m_cameras)
     {
         if(!data.pendingImage)
@@ -120,7 +176,9 @@ void SimpleRecordingPlayer::stepForward()
                 return;
             }
 
-            if(GenericImage::getTimestamp(data.pendingImage) == 0 && !isSingleSensorPlayback())
+            dwTime_t timeStamp;
+            dwImage_getTimestamp(&timeStamp, data.pendingImage);
+            if(timeStamp == 0 && !isSingleSensorPlayback())
                 throw std::runtime_error("SimpleRecordingPlayer: Camera image has no timestamp. Playback sync will not work.");
         }
     }
@@ -134,10 +192,19 @@ void SimpleRecordingPlayer::stepForward()
     if(m_isPendingIMUMsgValid && m_pendingIMUMsg.timestamp_us < earliestTimestamp)
         earliestTimestamp = m_pendingIMUMsg.timestamp_us;
 
+    if(m_isPendingGPSMsgValid && m_pendingGPSMsg.timestamp_us < earliestTimestamp)
+        earliestTimestamp = m_pendingGPSMsg.timestamp_us;
+
+    if(m_isPendingLidarPacketValid && m_pendingLidarPacket->hostTimestamp < earliestTimestamp)
+        earliestTimestamp = m_pendingLidarPacket->hostTimestamp;
+
     for(auto &camera : m_cameras)
     {
-        if(camera.pendingImage && GenericImage::getTimestamp(camera.pendingImage) < earliestTimestamp)
-            earliestTimestamp = GenericImage::getTimestamp(camera.pendingImage);
+        dwTime_t timeStamp;
+        dwImage_getTimestamp(&timeStamp, camera.pendingImage);
+
+        if(camera.pendingImage && timeStamp < earliestTimestamp)
+            earliestTimestamp = timeStamp;
     }
 
     // Send an event for the first sensor that matches the earliest timestamp
@@ -155,12 +222,29 @@ void SimpleRecordingPlayer::stepForward()
         m_handler->handleIMU(m_lastIMUMsg);
         m_isPendingIMUMsgValid = false;
     }
+    else if(m_isPendingGPSMsgValid && m_pendingGPSMsg.timestamp_us == earliestTimestamp)
+    {
+        // Process GPS
+        m_lastGPSMsg = m_pendingGPSMsg;
+        m_handler->handleGPS(m_lastGPSMsg);
+        m_isPendingGPSMsgValid = false;
+    }
+    else if(m_isPendingLidarPacketValid && m_pendingLidarPacket->hostTimestamp == earliestTimestamp)
+    {
+        // Process Lidar Packet
+        m_lastLidarPacket = m_pendingLidarPacket;
+        m_handler->handleLidar(m_lastLidarPacket);
+        m_isPendingLidarPacketValid = false;
+        dwSensorLidar_returnPacket(m_lastLidarPacket, m_lidarSensor);
+    }
     else
     {
         for(auto &camera : m_cameras)
         {
+            dwTime_t timeStamp;
+            dwImage_getTimestamp(&timeStamp, camera.pendingImage);
 
-            if(camera.pendingImage && GenericImage::getTimestamp(camera.pendingImage) == earliestTimestamp)
+            if(camera.pendingImage && timeStamp == earliestTimestamp)
             {
                 // Process image
                 size_t idx = &camera-&m_cameras[0];

@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_WINDOW_HPP__
-#define SAMPLES_COMMON_WINDOW_HPP__
+#ifndef SAMPLES_COMMON_WINDOW_HPP_
+#define SAMPLES_COMMON_WINDOW_HPP_
 
 #include <dw/core/EGL.h>
 #include <dw/gl/GL.h>
@@ -38,13 +38,23 @@ class WindowBase
 {
   public:
 
-    typedef void (*KeyPressCallback)(int key);
-    typedef void (*MouseDownCallback)(int button, float x, float y);
-    typedef void (*MouseUpCallback)(int button, float x, float y);
+    typedef void (*KeyDownCallback)(int key, int scancode, int mods);
+    typedef void (*KeyUpCallback)(int key, int scancode, int mods);
+    typedef void (*KeyRepeatCallback)(int key, int scancode, int mods);
+    typedef void (*KeyCallback)(int key, int scancode, int action, int mods);
+    typedef void (*MouseDownCallback)(int button, float x, float y, int mods);
+    typedef void (*MouseUpCallback)(int button, float x, float y, int mods);
     typedef void (*MouseMoveCallback)(float x, float y);
     typedef void (*MouseWheelCallback)(float dx, float dy);
+    typedef void (*CharModsCallback)(uint32_t codepoint, int32_t mods);
     typedef void (*ResizeWindowCallback)(int width, int height);
 
+    // Factory
+    static WindowBase *create(const char *title, int windowWidth,
+            int windowHeight, bool offscreen, int samples = 0,
+            bool initInvisible = false);
+    static WindowBase *create(int windowWidth, int windowHeight,
+            bool offscreen, int samples = 0);
 
     // create an X11 window
     //   width: width of window
@@ -52,11 +62,15 @@ class WindowBase
     WindowBase(int windowWidth, int windowHeight)
         : m_width(windowWidth)
         , m_height(windowHeight)
-        , m_keyPressCallback(nullptr)
+        , m_keyDownCallback(nullptr)
+        , m_keyUpCallback(nullptr)
+        , m_keyRepeatCallback(nullptr)
+        , m_keyCallback(nullptr)
         , m_mouseDownCallback(nullptr)
         , m_mouseUpCallback(nullptr)
         , m_mouseMoveCallback(nullptr)
         , m_mouseWheelCallback(nullptr)
+        , m_charModsCallback(nullptr)
         , m_resizeWindowCallback(nullptr)
     {
     }
@@ -68,6 +82,9 @@ class WindowBase
 
     // swap back and front buffers
     virtual bool swapBuffers() = 0;
+
+    // release EGL context
+    virtual bool releaseContext() = 0;
 
     // reset EGL context
     virtual void resetContext() = 0;
@@ -87,6 +104,20 @@ class WindowBase
     // Set the window size
     virtual bool setWindowSize(int w, int h) { (void)w; (void)h; return false; }
 
+    // Get the current desktop resolution
+    virtual bool getDesktopResolution(int& w, int& h) { w = 1280; h=800; return false; }
+
+    // Set windowed mode window to full screen
+    virtual bool setFullScreen() { return false; }
+
+    // indicate that the window is offscreen, hence no rendering needed
+    virtual bool isOffscreen() const { return false; }
+
+    // Set window position to center of screen
+    virtual bool setWindowPosCentered() { return false; }
+
+    virtual bool setWindowVisibility(bool visible) { (void)visible; return false; }
+
     // get EGL display
     virtual EGLDisplay getEGLDisplay(void) = 0;
     virtual EGLContext getEGLContext(void) = 0;
@@ -94,9 +125,24 @@ class WindowBase
     int width() const { return m_width; }
     int height() const { return m_height; }
 
-    void setOnKeypressCallback(KeyPressCallback callback)
+    void setOnKeyDownCallback(KeyDownCallback callback)
     {
-        m_keyPressCallback = callback;
+        m_keyDownCallback = callback;
+    }
+
+    void setOnKeyUpCallback(KeyUpCallback callback)
+    {
+        m_keyUpCallback = callback;
+    }
+
+    void setOnKeyRepeatCallback(KeyRepeatCallback callback)
+    {
+        m_keyRepeatCallback = callback;
+    }
+
+    void setOnKeypressCallback(KeyCallback callback)
+    {
+        m_keyCallback = callback;
     }
 
     void setOnMouseDownCallback(MouseDownCallback callback)
@@ -119,6 +165,11 @@ class WindowBase
         m_mouseWheelCallback = callback;
     }
 
+    void setOnCharModsCallback(CharModsCallback callback)
+    {
+        m_charModsCallback = callback;
+    }
+
     void setOnResizeWindowCallback(ResizeWindowCallback callback)
     {
         m_resizeWindowCallback = callback;
@@ -128,12 +179,16 @@ class WindowBase
     int m_width;
     int m_height;
 
-    KeyPressCallback m_keyPressCallback;
+    KeyDownCallback m_keyDownCallback;
+    KeyUpCallback m_keyUpCallback;
+    KeyRepeatCallback m_keyRepeatCallback;
+    KeyCallback m_keyCallback;
     MouseDownCallback m_mouseDownCallback;
     MouseUpCallback m_mouseUpCallback;
     MouseMoveCallback m_mouseMoveCallback;
     MouseWheelCallback m_mouseWheelCallback;
+    CharModsCallback m_charModsCallback;
     ResizeWindowCallback m_resizeWindowCallback;
 };
 
-#endif // SAMPLES_COMMON_WINDOW_HPP__
+#endif // SAMPLES_COMMON_WINDOW_HPP_

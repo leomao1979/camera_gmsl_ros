@@ -28,23 +28,24 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_WINDOWEGL_HPP__
-#define SAMPLES_COMMON_WINDOWEGL_HPP__
+#ifndef SAMPLES_COMMON_WINDOWEGL_HPP_
+#define SAMPLES_COMMON_WINDOWEGL_HPP_
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
 #include "Window.hpp"
-#include <memory>
 
 /**
  * @brief The EGLDisplay class
  */
-class WindowOffscreenEGL : public WindowBase
+class WindowEGL : public WindowBase
 {
   public:
-    WindowOffscreenEGL(int width, int height);
-    virtual ~WindowOffscreenEGL();
+    // Factory
+    static WindowEGL *create(int width, int height, bool offscreen);
+
+    virtual ~WindowEGL();
 
     EGLDisplay getEGLDisplay() override
     {
@@ -62,11 +63,13 @@ class WindowOffscreenEGL : public WindowBase
     bool makeCurrent() override;
     bool resetCurrent() override;
     bool swapBuffers() override;
+    bool releaseContext() override;
     void resetContext() override;
     EGLContext createSharedContext() const override;
 
   protected:
-    bool initDrm(const char *name, EGLAttrib *layerAttribs, int &dispWidth, int &dispHeight);
+    WindowEGL(int width, int height, bool offscreen);
+    bool initEGL();
 
     EGLDisplay m_display;
     EGLContext m_context;
@@ -75,6 +78,17 @@ class WindowOffscreenEGL : public WindowBase
     EGLStreamKHR m_stream;
 
     bool m_offscreen;
+
+    // EGL Function Pointers
+    PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT = nullptr;
+    PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC eglCreatePlatformWindowSurfaceEXT = nullptr;
+    PFNEGLCREATEPLATFORMPIXMAPSURFACEEXTPROC eglCreatePlatformPixmapSurfaceEXT = nullptr;
+    PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT = nullptr;
+    PFNEGLQUERYDEVICESTRINGEXTPROC eglQueryDeviceStringEXT = nullptr;
+
+    PFNEGLCREATESTREAMKHRPROC eglCreateStreamKHR = nullptr;
+    PFNEGLDESTROYSTREAMKHRPROC eglDestroyStreamKHR = nullptr;
+    PFNEGLCREATESTREAMPRODUCERSURFACEKHRPROC eglCreateStreamProducerSurfaceKHR = nullptr;
 };
 
-#endif // SAMPLES_COMMON_WINDOWEGL_HPP__
+#endif // SAMPLES_COMMON_WINDOWEGL_HPP_

@@ -6,8 +6,8 @@
  * distribution of this software and related documentation without an express
  * license agreement from NVIDIA CORPORATION is strictly prohibited.
  */
-#ifndef SAMPLES_COMMON_STATSCOUNTER_HPP__
-#define SAMPLES_COMMON_STATSCOUNTER_HPP__
+#ifndef SAMPLES_COMMON_STATSCOUNTER_HPP_
+#define SAMPLES_COMMON_STATSCOUNTER_HPP_
 
 #include <dw/core/Types.h>
 
@@ -37,7 +37,8 @@ class StatsCounter
 
     void addSample(float32_t sample)
     {
-        m_samples.push_back(sample);
+        if(m_samples.size() < MAX_SAMPLE_COUNT)
+            m_samples.push_back(sample);
 
         m_count++;
         m_sum += sample;
@@ -91,7 +92,9 @@ class StatsCounter
     float32_t getVariance() const
     {
         float32_t mean = getMean();
-        return m_sumSq/static_cast<float32_t>(m_count) - mean*mean;
+        float32_t var  = m_sumSq/static_cast<float32_t>(m_count) - mean*mean;
+
+        return std::abs(var) <= 1e-7f ? 0 : var;
     }
 
     float32_t getStdDev() const
@@ -105,8 +108,8 @@ class StatsCounter
     */
     float32_t getMedian()
     {
-        if (m_samples.empty())
-            return 0;
+        if (m_samples.empty() || m_samples.size() >= MAX_SAMPLE_COUNT)
+            return std::numeric_limits<float32_t>::quiet_NaN();
 
         size_t n = m_samples.size() / 2;
         std::nth_element(m_samples.begin(), m_samples.begin()+n, m_samples.end());
@@ -130,6 +133,7 @@ class StatsCounter
 
   protected:
     //Full sample array stored to calculate median
+    static constexpr size_t MAX_SAMPLE_COUNT = 5000;
     std::vector<float32_t> m_samples;
 
     //These are used to calculate mean and variance
@@ -151,4 +155,4 @@ std::ostream &operator <<(std::ostream &stream, const StatsCounter &counter)
 } // namespace testing
 } // namespace dw
 
-#endif // TESTS_COMMON_STATSCOUNTER_HPP__
+#endif // TESTS_COMMON_STATSCOUNTER_HPP_

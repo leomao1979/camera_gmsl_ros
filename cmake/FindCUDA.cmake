@@ -82,11 +82,16 @@
 #      is used. Ignored if -ccbin or --compiler-bindir is already present in the
 #      CUDA_NVCC_FLAGS or CUDA_NVCC_FLAGS_<CONFIG> variables.  For Visual Studio
 #      targets $(VCInstallDir)/bin is a special value that expands out to the
-#      path when the command is run from withing VS.
+#      path when the command is run from within VS.
 #
 #   CUDA_USE_PYNVCCCACHE (Default OFF)
 #   -- Use pynvccache as cuda compilation cache if available and dependencies
 #      are fulfilled. Otherwise fall-back to regular non-cached cuda compilation.
+#
+#   CUDA_DETERMINE_HOST_GPU_CODE_FLAGS (Default ON)
+#   -- Determine GPU architecture of CUDAS GPUs in host system. Saved to
+#      variable CUDA_HOST_GPU_CODE_FLAGS (e.g., '--gpu-code=sm_30,sm_61') to be
+#      used in NVCC command line arguments.
 #
 #   CUDA_NON_PROPAGATED_HOST_FLAGS
 #   -- If CUDA_PROPAGATE_HOST_FLAGS is set to ON, a list of flags which
@@ -166,7 +171,7 @@
 #           CUDA_DEPENDENCY_DIRS
 #         They are used to create the custom commands to update dependencies. These
 #         variables have to be empty before the first time CUDA_WRAP_SRCS is called.
-#         The funciton CUDA_RESET_INTERNAL_CACHE() can be used to clear them.
+#         The function CUDA_RESET_INTERNAL_CACHE() can be used to clear them.
 #
 #   CUDA_RESET_INTERNAL_CACHE()
 #   -- Resets all internal cache variables. Should be called at the end of the main
@@ -236,7 +241,7 @@
 #      The arguments passed in after OPTIONS are extra command line options to
 #      give to nvcc.  You can also specify per configuration options by
 #      specifying the name of the configuration followed by the options.  General
-#      options must preceed configuration specific options.  Not all
+#      options must precede configuration specific options.  Not all
 #      configurations need to be specified, only the ones provided will be used.
 #
 #         OPTIONS -DFLAG=2 "-DFLAG_OTHER=space in flag"
@@ -499,7 +504,7 @@ else()
         # there are 2 modes in which ccache can be invoked:
         # /usr/lib/ccache/<compiler> where compiler is a symlink to ccache who will determine which compiler to use
         # depending on its invokation.
-        # /usr/bin/ccache <compiler> where ccache will redirect the call, we will differenciate between the 2 
+        # /usr/bin/ccache <compiler> where ccache will redirect the call, we will differenciate between the 2
         # by checking the first argument for an empty string
         if ("${CMAKE_CXX_COMPILER_ARG1}" STREQUAL "")
             set(c_compiler_realpath "${CMAKE_CXX_COMPILER}")
@@ -522,6 +527,10 @@ option(CUDA_PROPAGATE_HOST_FLAGS "Propagate C/CXX_FLAGS and friends to the host 
 # Use pynvccache cache
 if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/pynvcccache)
   option(CUDA_USE_PYNVCCCACHE "Use pynvccache compiler cache" OFF)
+endif()
+
+if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/FindCUDA/get_cuda_sm.sh)
+  option(CUDA_DETERMINE_HOST_GPU_CODE_FLAGS "Determine current real host GPU code nvcc flags" ON)
 endif()
 
 # Prevent some flags from being propagated
@@ -549,7 +558,7 @@ mark_as_advanced(
 # Makefile and similar generators don't define CMAKE_CONFIGURATION_TYPES, so we
 # need to add another entry for the CMAKE_BUILD_TYPE.  We also need to add the
 # standerd set of 4 build types (Debug, MinSizeRel, Release, and RelWithDebInfo)
-# for completeness.  We need run this loop in order to accomodate the addition
+# for completeness.  We need run this loop in order to accommodate the addition
 # of extra configuration types.  Duplicate entries will be removed by
 # REMOVE_DUPLICATES.
 set(CUDA_configuration_types ${CMAKE_CONFIGURATION_TYPES} ${CMAKE_BUILD_TYPE} Debug MinSizeRel Release RelWithDebInfo)
@@ -708,7 +717,9 @@ set(CUDA_VERSION_STRING "${CUDA_VERSION}")
 if(CUDA_VERSION VERSION_GREATER "5.0" AND CMAKE_CROSSCOMPILING)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" AND EXISTS "${CUDA_TOOLKIT_ROOT_DIR}/targets/armv7-linux-gnueabihf")
     set(CUDA_TOOLKIT_TARGET_DIR "${CUDA_TOOLKIT_ROOT_DIR}/targets/armv7-linux-gnueabihf" CACHE PATH "Toolkit target location.")
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND EXISTS "${CUDA_TOOLKIT_ROOT_DIR}/targets/aarch64-linux")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND VIBRANTE_V5Q AND EXISTS "${CUDA_TOOLKIT_ROOT_DIR}/targets/aarch64-qnx")
+    set(CUDA_TOOLKIT_TARGET_DIR "${CUDA_TOOLKIT_ROOT_DIR}/targets/aarch64-qnx" CACHE PATH "Toolkit target location.")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND VIBRANTE_V5L AND EXISTS "${CUDA_TOOLKIT_ROOT_DIR}/targets/aarch64-linux")
     set(CUDA_TOOLKIT_TARGET_DIR "${CUDA_TOOLKIT_ROOT_DIR}/targets/aarch64-linux" CACHE PATH "Toolkit target location.")
   endif()
 else()
@@ -744,6 +755,7 @@ mark_as_advanced(CUDA_TOOLKIT_INCLUDE)
 
 # Set the user list of include dir to nothing to initialize it.
 set (CUDA_NVCC_INCLUDE_ARGS_USER "")
+set (CUDA_NVCC_SYSTEM_INCLUDE_ARGS_USER "")
 set (CUDA_INCLUDE_DIRS ${CUDA_TOOLKIT_INCLUDE})
 
 # Find nvidia driver version
@@ -787,6 +799,8 @@ macro(cuda_find_library_local_first_with_path_ext _var _names _doc _path_ext )
     DOC ${_doc}
     HINTS ${VIBRANTE_PDK}/lib-target
           "/usr/lib/nvidia-${nvidia-driver-version}"
+          "/usr/lib/nvidia-396"
+          "/usr/lib/nvidia-390"
           "/usr/lib/nvidia-367"
           "/usr/lib/nvidia-364"
           "/usr/lib/nvidia-361"
@@ -1003,6 +1017,12 @@ find_package_handle_standard_args(CUDA
 macro(CUDA_INCLUDE_DIRECTORIES)
   foreach(dir ${ARGN})
     list(APPEND CUDA_NVCC_INCLUDE_ARGS_USER -I${dir})
+  endforeach()
+endmacro()
+
+macro(CUDA_SYSTEM_INCLUDE_DIRECTORIES)
+  foreach(dir ${ARGN})
+    list(APPEND CUDA_NVCC_SYSTEM_INCLUDE_ARGS_USER "${dir}")
   endforeach()
 endmacro()
 
@@ -1238,6 +1258,10 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     endforeach()
   endif()
 
+  foreach(dir ${CUDA_NVCC_SYSTEM_INCLUDE_ARGS_USER})
+    list(APPEND CUDA_NVCC_INCLUDE_ARGS -isystem ${dir})
+  endforeach()
+
   # Reset these variables
   set(CUDA_WRAP_OPTION_NVCC_FLAGS)
   foreach(config ${CUDA_configuration_types})
@@ -1316,6 +1340,13 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
       if(CUDA_NON_PROPAGATED_HOST_FLAGS)
         list(APPEND _cuda_non_propagated_host_flags ${CUDA_NON_PROPAGATED_HOST_FLAGS})
       endif()
+
+      if(VIBRANTE_V5Q)
+        list(APPEND _cuda_non_propagated_host_flags "-nostdinc++")
+        list(APPEND _cuda_non_propagated_host_flags "-nostdinc")
+        list(APPEND _cuda_non_propagated_host_flags "-isystem ${QNX_TARGET}/usr/include/c++/v1")
+      endif()
+
       foreach(flag ${_cuda_non_propagated_host_flags})
         string(REPLACE "${flag}" "" _cuda_host_flags "${_cuda_host_flags}")
       endforeach()
@@ -1937,3 +1968,23 @@ macro(CUDA_BUILD_CLEAN_TARGET)
   # have been removed.
   set(CUDA_ADDITIONAL_CLEAN_FILES "" CACHE INTERNAL "List of intermediate files that are part of the cuda dependency scanning.")
 endmacro()
+
+###############################################################################
+###############################################################################
+# CUDA LOCAL GPU ARCH DETERMINATION
+###############################################################################
+###############################################################################
+if(CUDA_DETERMINE_HOST_GPU_CODE_FLAGS)
+  if(NOT CUDA_HOST_GPU_CODE_FLAGS)
+    execute_process(COMMAND ${CMAKE_CURRENT_LIST_DIR}/FindCUDA/get_cuda_sm.sh
+                    RESULT_VARIABLE result
+                    OUTPUT_VARIABLE output)
+    if(NOT result)
+      string(STRIP ${output} output)
+      set(CUDA_HOST_GPU_CODE_FLAGS ${output} CACHE STRING "NVCC GPU code flags determined by host introspection")
+      message(STATUS "Determined CUDA_HOST_GPU_CODE_FLAGS ${CUDA_HOST_GPU_CODE_FLAGS}")
+    endif()
+  endif()
+else()
+  unset(CUDA_HOST_GPU_CODE_FLAGS CACHE) # make sure no previously cached results are used
+endif()

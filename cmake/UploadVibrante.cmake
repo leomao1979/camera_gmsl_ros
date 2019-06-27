@@ -7,7 +7,7 @@ if(VIBRANTE_BUILD)
     set(VIBRANTE_INSTALL_PATH "/home/nvidia/driveworks" CACHE STRING "Directory on the target board where to install the SDK")
     set(VIBRANTE_USER "nvidia" CACHE STRING "User used for ssh to upload files over to the board")
     set(VIBRANTE_PASSWORD "nvidia" CACHE STRING "Password of the specified user")
-    set(VIBRANTE_HOST "192.168.10.10" CACHE STRING "Hostname or IP adress of the tegra board")
+    set(VIBRANTE_HOST "192.168.10.10" CACHE STRING "Hostname or IP address of the tegra board")
     set(VIBRANTE_PORT "22" CACHE STRING "SSH port of the tegra board")
 
     if(SDK_DEPLOY_BUILD OR ${PROJECT_NAME} MATCHES "DriveworksSDK-Samples")

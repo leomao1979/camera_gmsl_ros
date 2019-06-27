@@ -182,7 +182,7 @@ void SimpleRenderer::renderRectangles(const dwRect* rectangles, uint32_t numBoxe
     }
 
     for (uint32_t i = 0U; i < n_boxes; ++i) {
-        setRectangleCoords(coords, rectangles[i], vertexStride);
+        setRectangleCoords(coords + 8*i*vertexStride, rectangles[i], vertexStride);
     }
 
     CHECK_DW_ERROR(dwRenderBuffer_unmap(n_verts, m_renderBuffer[DW_RENDER_PRIM_LINELIST]));

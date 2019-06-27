@@ -28,15 +28,16 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef COMMON_SIMPLERECORDINGPLAYER_HPP__
-#define COMMON_SIMPLERECORDINGPLAYER_HPP__
+#ifndef COMMON_SIMPLERECORDINGPLAYER_HPP_
+#define COMMON_SIMPLERECORDINGPLAYER_HPP_
 
 // Driveworks
 #include <dw/core/Context.h>
 #include <dw/sensors/Sensors.h>
 #include <dw/sensors/canbus/CAN.h>
 #include <dw/sensors/imu/IMU.h>
-
+#include <dw/sensors/gps/GPS.h>
+#include <dw/sensors/lidar/Lidar.h>
 // Common
 #include <framework/SimpleCamera.hpp>
 
@@ -51,7 +52,9 @@ class ISensorEventHandler
 public:
     virtual void handleCAN(const dwCANMessage &) {throw std::runtime_error("CAN requested but not processed");}
     virtual void handleIMU(const dwIMUFrame &) {throw std::runtime_error("IMU requested but not processed");}
-    virtual void handleCamera(uint32_t idx, dwImageGeneric *frame) {(void)idx; (void)frame; throw std::runtime_error("Camera requested but not processed");}
+    virtual void handleGPS(const dwGPSFrame &) {throw std::runtime_error("GPS requested but not processed");}
+    virtual void handleLidar(const dwLidarDecodedPacket *packet) {(void)packet; throw std::runtime_error("Lidar requested but not processed");}
+    virtual void handleCamera(uint32_t idx, dwImageHandle_t frame) {(void)idx; (void)frame; throw std::runtime_error("Camera requested but not processed");}
     virtual void handleEndOfStream() {}
 
 protected:
@@ -70,8 +73,14 @@ public:
         : m_handler(handler)
         , m_canSensor(nullptr)
         , m_imuSensor(nullptr)
+        , m_gpsSensor(nullptr)
+        , m_lidarSensor(DW_NULL_HANDLE)
         , m_isPendingCANMsgValid(false)
         , m_isPendingIMUMsgValid(false)
+        , m_isPendingGPSMsgValid(false)
+        , m_isPendingLidarPacketValid(false)
+        , m_pendingLidarPacket(nullptr)
+        , m_lastLidarPacket(nullptr)
     {
     }
 
@@ -94,6 +103,16 @@ public:
         m_imuSensor = imu;
     }
 
+    void setGPS(dwSensorHandle_t gps)
+    {
+        m_gpsSensor = gps;
+    }
+
+    void setLidar(dwSensorHandle_t lidar)
+    {
+        m_lidarSensor = lidar;
+    }
+
     /// Determines whether only a single sensor is being played back.
     /// When only a single sensor is active, missing timestamps will not trigger an exception
     bool isSingleSensorPlayback() const
@@ -102,6 +121,10 @@ public:
         if(m_canSensor != DW_NULL_HANDLE)
             count++;
         if(m_imuSensor != DW_NULL_HANDLE)
+            count++;
+        if(m_gpsSensor != DW_NULL_HANDLE)
+            count++;
+        if(m_lidarSensor != DW_NULL_HANDLE)
             count++;
         count += m_cameras.size();
         return count==1;
@@ -117,7 +140,9 @@ public:
 
     const dwCANMessage &getLastCAN() const {return m_lastCANMsg;}
     const dwIMUFrame &getLastIMU() const {return m_lastIMUMsg;}
-    dwImageGeneric *getLastImage(uint32_t idx) const {return m_lastImages[idx];}
+    const dwGPSFrame &getLastGPS() const {return m_lastGPSMsg;}
+    const dwLidarDecodedPacket &getLastLidar() const {return *m_lastLidarPacket;}
+    dwImageHandle_t getLastImage(uint32_t idx) const {return m_lastImages[idx];}
 
 protected:
     ISensorEventHandler *m_handler;
@@ -125,25 +150,32 @@ protected:
     struct CameraData
     {
         SimpleCamera *camera;
-        dwImageGeneric *pendingImage;
+        dwImageHandle_t pendingImage;
     };
 
     // Sensors used in replay
     dwSensorHandle_t m_canSensor;
     dwSensorHandle_t m_imuSensor;
+    dwSensorHandle_t m_gpsSensor;
+    dwSensorHandle_t m_lidarSensor;
     std::vector<CameraData> m_cameras;
 
     // Data read but not used yet
     bool m_isPendingCANMsgValid;
     bool m_isPendingIMUMsgValid;
+    bool m_isPendingGPSMsgValid;
+    bool m_isPendingLidarPacketValid;
     dwCANMessage m_pendingCANMsg;
     dwIMUFrame m_pendingIMUMsg;
-
+    dwGPSFrame m_pendingGPSMsg;
+    const dwLidarDecodedPacket *m_pendingLidarPacket;
     // Data that was passed in the last handleXXX call.
     // Can also be retrieved by the user from here later before a new event overwrites it.
     dwCANMessage m_lastCANMsg;
     dwIMUFrame m_lastIMUMsg;
-    std::vector<dwImageGeneric *> m_lastImages;
+    dwGPSFrame m_lastGPSMsg;
+    const dwLidarDecodedPacket *m_lastLidarPacket;
+    std::vector<dwImageHandle_t > m_lastImages;
 };
 
 }

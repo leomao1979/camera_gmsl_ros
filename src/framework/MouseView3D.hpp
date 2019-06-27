@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_MOUSEVIEW3D_HPP__
-#define SAMPLES_COMMON_MOUSEVIEW3D_HPP__
+#ifndef SAMPLES_COMMON_MOUSEVIEW3D_HPP_
+#define SAMPLES_COMMON_MOUSEVIEW3D_HPP_
 
 class MouseView3D
 {
@@ -64,6 +64,7 @@ class MouseView3D
     void mouseWheel(float dx, float dy);
 
     void setCenter(float x, float y, float z);
+    void setRadiusFromCenter(float zoom);
     const float* getCenter() const {
         return m_center;
     }
@@ -96,4 +97,4 @@ class MouseView3D
     void updateMatrices();
 };
 
-#endif // SAMPLES_COMMON_MOUSEVIEW3D_HPP__
+#endif // SAMPLES_COMMON_MOUSEVIEW3D_HPP_

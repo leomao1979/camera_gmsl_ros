@@ -28,14 +28,16 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_WINDOWGLFW_HPP__
-#define SAMPLES_COMMON_WINDOWGLFW_HPP__
+#ifndef SAMPLES_COMMON_WINDOWGLFW_HPP_
+#define SAMPLES_COMMON_WINDOWGLFW_HPP_
 
 #include "Window.hpp"
 
 #ifdef VIBRANTE
     #define GLFW_INCLUDE_ES3
-    #define GLFW_EXPOSE_NATIVE_X11
+    #ifndef VIBRANTE_V5Q
+        #define GLFW_EXPOSE_NATIVE_X11
+    #endif
     #define GLFW_EXPOSE_NATIVE_EGL
     #include <EGL/egl.h>
 #endif
@@ -45,20 +47,28 @@
 
 class WindowGLFW : public WindowBase
 {
-  public:
+public:
     // create an X11 window
     //   width: width of window
     //   height: height of window
-    WindowGLFW(const char* title, int width, int height, bool invisible = false);
-    WindowGLFW(int w, int h, bool invisible = false)
-        : WindowGLFW("DriveWorks", w, h, invisible)
+    //   offscreen: rendering to this window is not intended to present to the display
+    //   samples: specifies the desired number of samples to use for subsampling
+    //   initIvisible: make the window initially invisible, setWindowVisibility can be
+    //                 used to change visibility some time after window creation
+    WindowGLFW(const char* title, int width, int height, bool offscreen, int samples = 0,
+               bool initInvisible = false);
+    WindowGLFW(int w, int h, bool offscreen = false, int samples = 0)
+        : WindowGLFW("DriveWorks", w, h, offscreen, samples)
     {}
 
     // release window
-    ~WindowGLFW();
+    ~WindowGLFW() override;
 
     // swap back and front buffers - return false if failed, i.e. window need close
     bool swapBuffers() override;
+
+    // release the current context
+    bool releaseContext() override;
 
     // reset EGL context
     void resetContext() override;
@@ -72,22 +82,38 @@ class WindowGLFW : public WindowBase
     bool resetCurrent() override;
 
     bool shouldClose() override { return glfwWindowShouldClose(m_hWindow) != 0; }
+    bool isOffscreen() const override { return m_offscreen; }
 
     // Set the window size
     bool setWindowSize(int width, int height) override;
+
+    // Get the current desktop resolution
+    bool getDesktopResolution(int& width, int& height) override;
+
+    // Set windowed mode window to full screen
+    bool setFullScreen() override;
+
+    bool setWindowPosCentered() override;
+
+    bool setWindowVisibility(bool visible) override;
 
     // get EGL display
     EGLDisplay getEGLDisplay(void) override;
     EGLContext getEGLContext(void) override;
 
-    void onKeyCallback(int key, int scancode, int action, int mods);
-    void onMouseButtonCallback(int button, int action, int mods);
-    void onMouseMoveCallback(double x, double y);
-    void onMouseWheelCallback(double dx, double dy);
-    void onResizeWindowCallback(int width, int height);
+    GLFWwindow *getGLFW() const {return m_hWindow;}
 
-  protected:
+    virtual void onKeyCallback(int key, int scancode, int action, int mods);
+    virtual void onMouseButtonCallback(int button, int action, int mods);
+    virtual void onMouseMoveCallback(double x, double y);
+    virtual void onMouseWheelCallback(double dx, double dy);
+    virtual void onCharModsCallback(uint32_t codepoint, int32_t mods);
+    virtual void onResizeWindowCallback(int width, int height);
+
+protected:
     GLFWwindow *m_hWindow;
+
+    bool m_offscreen;
 
 #ifdef VIBRANTE
     EGLDisplay m_display;
@@ -96,4 +122,4 @@ class WindowGLFW : public WindowBase
 #endif
 };
 
-#endif // SAMPLES_COMMON_WINDOWGLFW_HPP__
+#endif // SAMPLES_COMMON_WINDOWGLFW_HPP_

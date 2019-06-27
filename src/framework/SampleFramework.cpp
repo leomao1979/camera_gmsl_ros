@@ -36,10 +36,13 @@
 
 #include "SampleFramework.hpp"
 
+#include "WindowGLFW.hpp"
+
 void (*gUserKeyPressCallback)(int) = 0;
 ProgramArguments gArguments;
 WindowBase *gWindow = nullptr;
 bool gRun = false;
+bool gPause = false;
 
 void sig_int_handler(int sig)
 {
@@ -48,11 +51,15 @@ void sig_int_handler(int sig)
     gRun = false;
 }
 
-void keyPressCallback(int key)
+void keyPressCallback(int key, int /*scancode*/, int action, int /*mods*/)
 {
-    // stop application
-    if (key == GLFW_KEY_ESCAPE)
-        gRun = false;
+    if (action == GLFW_PRESS) {
+        // stop application
+        if (key == GLFW_KEY_ESCAPE)
+            gRun = false;
+        else if (key == GLFW_KEY_SPACE)
+            gPause = !gPause;
+    }
 
     if (gUserKeyPressCallback)
     {
@@ -229,7 +236,8 @@ void drawBoxesWithLabels(const std::vector<std::pair<dwBox2D, std::string>> &box
 bool initSampleApp( int argc, const char **argv,
                     const ProgramArguments* arguments,
                     void (*userKeyPressCallback)(int),
-                    uint32_t width, uint32_t height)
+                    uint32_t width, uint32_t height,
+                    bool offscreen, int samples)
 {
     gUserKeyPressCallback = userKeyPressCallback;
 
@@ -263,7 +271,7 @@ bool initSampleApp( int argc, const char **argv,
 
     // Setup Window for Output, initialize the GL and GLFW
     try {
-        gWindow = gWindow ? gWindow : new WindowGLFW(width, height);
+        gWindow = gWindow ? gWindow : WindowBase::create(width, height, offscreen, samples);
     }
     catch (const std::exception &/*ex*/) {
         gWindow = nullptr;

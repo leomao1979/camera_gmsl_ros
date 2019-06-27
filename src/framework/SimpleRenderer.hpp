@@ -6,13 +6,13 @@
  * distribution of this software and related documentation without an express
  * license agreement from NVIDIA CORPORATION is strictly prohibited.
  */
-#ifndef SAMPLES_COMMON_SIMPLERENDERER_HPP__
-#define SAMPLES_COMMON_SIMPLERENDERER_HPP__
+#ifndef SAMPLES_COMMON_SIMPLERENDERER_HPP_
+#define SAMPLES_COMMON_SIMPLERENDERER_HPP_
 
 #include <framework/Checks.hpp>
-#include <framework/GenericImage.hpp>
 
 #include <dw/renderer/Renderer.h>
+#include <dw/image/Image.h>
 
 #include <vector>
 

@@ -39,10 +39,13 @@ SimpleCamera::SimpleCamera(const dwSensorParams &params, dwSALHandle_t sal, dwCo
                            dwCameraOutputType outputType)
     : m_ctx(ctx)
     , m_sal(sal)
+    , m_converter(DW_NULL_HANDLE)
     , m_pendingFrame(nullptr)
     , m_outputType(outputType)
+    , m_converterRgba(DW_NULL_HANDLE)
     , m_pendingFrameRgba(nullptr)
     , m_pendingFrameRgbaGL(nullptr)
+    , m_started(false)
 {
 
     CHECK_DW_ERROR( dwSAL_createSensor(&m_sensor, params, m_sal) );
@@ -52,8 +55,6 @@ SimpleCamera::SimpleCamera(const dwSensorParams &params, dwSALHandle_t sal, dwCo
     m_outputProperties = m_imageProperties;
 
     std::cout << "Camera image: " << m_imageProperties.width << "x" << m_imageProperties.height << std::endl;
-
-    CHECK_DW_ERROR( dwSensor_start(m_sensor));
 }
 
 SimpleCamera::SimpleCamera(const dwImageProperties &outputProperties, const dwSensorParams &params,
@@ -66,11 +67,18 @@ SimpleCamera::SimpleCamera(const dwImageProperties &outputProperties, const dwSe
 
 SimpleCamera::~SimpleCamera()
 {
+    if (m_converter)
+        dwImage_destroy(&m_converter);
+
+    if (m_converterRgba)
+        dwImage_destroy(&m_converterRgba);
+
     if(m_pendingFrame)
         releaseFrame();
 
     if(m_sensor) {
-        dwSensor_stop(m_sensor);
+        if (m_started)
+            dwSensor_stop(m_sensor);
         dwSAL_releaseSensor(&m_sensor);
     }
 }
@@ -81,23 +89,25 @@ void SimpleCamera::setOutputProperties(const dwImageProperties &outputProperties
     m_outputProperties.width = m_imageProperties.width;
     m_outputProperties.height = m_imageProperties.height;
 
-    dwImageProperties newProperties = m_imageProperties;
     if(m_imageProperties.type != outputProperties.type)
     {
-        m_streamer.reset(new GenericSimpleImageStreamer(m_imageProperties, outputProperties.type, 66666, m_ctx));
-        newProperties.type = m_outputProperties.type;
+        m_streamer.reset(new SimpleImageStreamer<>(m_imageProperties, outputProperties.type, 66666, m_ctx));
     }
 
-    if (((m_imageProperties.pxlFormat != outputProperties.pxlFormat) ||
-         (m_imageProperties.pxlType != outputProperties.pxlType) ||
-         (m_imageProperties.planeCount != outputProperties.planeCount)))
+    if (m_imageProperties.format != outputProperties.format)
     {
-        m_converter.reset(new GenericSimpleFormatConverter(newProperties, m_outputProperties, m_ctx));
+        dwImage_create(&m_converter, m_outputProperties, m_ctx);
     }
 }
 
-dwImageGeneric *SimpleCamera::readFrame()
+dwImageHandle_t SimpleCamera::readFrame()
 {
+    if(!m_started)
+    {
+        CHECK_DW_ERROR( dwSensor_start(m_sensor));
+        m_started = true;
+    }
+
     if(m_pendingFrame)
         releaseFrame();
 
@@ -115,34 +125,10 @@ dwImageGeneric *SimpleCamera::readFrame()
         throw std::runtime_error("Error reading from camera");
     }
 
-    dwImageGeneric *img;
-    switch(m_imageProperties.type)
-    {
-    case DW_IMAGE_CPU: {
-        dwImageCPU *img_;
-        CHECK_DW_ERROR( dwSensorCamera_getImageCPU(&img_, m_outputType, m_pendingFrame));
-        img = GenericImage::fromDW(img_);
-        break;
-    }
-    case DW_IMAGE_CUDA: {
-        dwImageCUDA *img_;
-        CHECK_DW_ERROR( dwSensorCamera_getImageCUDA(&img_, m_outputType, m_pendingFrame));
-        img = GenericImage::fromDW(img_);
-        break;
-    }
-    #ifdef VIBRANTE
-    case DW_IMAGE_NVMEDIA: {
-        dwImageNvMedia *img_;
-        CHECK_DW_ERROR( dwSensorCamera_getImageNvMedia(&img_, m_outputType, m_pendingFrame));
-        img = GenericImage::fromDW(img_);
-        break;
-    }
-    #endif
-    default:
-        throw std::runtime_error("Invalid image type");
-    }
+    dwImageHandle_t img;
+    CHECK_DW_ERROR( dwSensorCamera_getImage(&img, m_outputType, m_pendingFrame));
 
-    dwImageGeneric *imgOutput = img;
+    dwImageHandle_t imgOutput = img;
     if(m_streamer)
     {
         imgOutput = m_streamer->post(img);
@@ -150,14 +136,15 @@ dwImageGeneric *SimpleCamera::readFrame()
 
     if (m_converter)
     {
-        imgOutput = m_converter->convert(imgOutput);
+        dwImage_copyConvert(m_converter, imgOutput, m_ctx);
+        imgOutput = m_converter;
     }
 
     // OpenGL
     if(isGLOutputEnabled())
     {
-        m_pendingFrameRgba = m_converterRgba->convert(img);
-        m_pendingFrameRgbaGL = GenericImage::toDW<dwImageGL>(m_streamerGL->post(m_pendingFrameRgba));
+        dwImage_copyConvert(m_converterRgba, img, m_ctx);
+        m_pendingFrameRgbaGL = m_streamerGL->post(m_converterRgba);
     }
 
     return imgOutput;
@@ -179,24 +166,24 @@ void SimpleCamera::resetCamera()
 void SimpleCamera::enableGLOutput()
 {
     dwImageProperties propsRgba = m_imageProperties;
-    propsRgba.pxlFormat = DW_IMAGE_RGBA;
-    propsRgba.pxlType = DW_TYPE_UINT8;
-    propsRgba.planeCount = 1;
+    propsRgba.format = DW_IMAGE_FORMAT_RGBA_UINT8;
 
-    m_converterRgba.reset(new GenericSimpleFormatConverter(m_imageProperties, propsRgba, m_ctx));
-    m_streamerGL.reset(new GenericSimpleImageStreamer(propsRgba, DW_IMAGE_GL, 60000, m_ctx));
+    dwImage_create(&m_converterRgba, propsRgba, m_ctx);
+    m_streamerGL.reset(new SimpleImageStreamer<>(propsRgba, DW_IMAGE_GL, 60000, m_ctx));
 }
 
 //////////////////////////////////////////////////////////////////////////////////////
 /// RawSimpleCamera
 ///
 
-RawSimpleCamera::RawSimpleCamera(const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx, cudaStream_t stream, dwCameraOutputType outputType)
-    :SimpleCamera(params, sal, ctx, DW_CAMERA_RAW_IMAGE)
+RawSimpleCamera::RawSimpleCamera(const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx, cudaStream_t stream, 
+        dwCameraOutputType outputType, dwSoftISPDemosaicMethod demosaicMethod)
+    :SimpleCamera(params, sal, ctx, DW_CAMERA_OUTPUT_NATIVE_RAW)
+    , m_converter_final(DW_NULL_HANDLE)
 {
     m_doTonemap = false;
 
-    if (outputType == DW_CAMERA_PROCESSED_IMAGE) {
+    if (outputType == DW_CAMERA_OUTPUT_NATIVE_PROCESSED) {
         m_doTonemap = true;
     }
 
@@ -206,53 +193,115 @@ RawSimpleCamera::RawSimpleCamera(const dwSensorParams &params, dwSALHandle_t sal
     SimpleCamera::setOutputProperties(cameraImageProps);
 
     dwSoftISPParams softISPParams;
-    CHECK_DW_ERROR(dwSoftISP_initParamsFromCamera(&softISPParams, SimpleCamera::m_cameraProperties));
-    CHECK_DW_ERROR(dwSoftISP_initialize(&m_softISP, softISPParams, ctx));
+    CHECK_DW_ERROR(dwSoftISP_initParamsFromCamera(&softISPParams, &m_cameraProperties));
+    CHECK_DW_ERROR(dwSoftISP_initialize(&m_softISP, &softISPParams, ctx));
 
     // Initialize Raw pipeline
     CHECK_DW_ERROR(dwSoftISP_setCUDAStream(stream, m_softISP));
-
+    CHECK_DW_ERROR(dwSoftISP_setDemosaicMethod(demosaicMethod, m_softISP));
     CHECK_DW_ERROR(dwSoftISP_getDemosaicImageProperties(&m_rawOutputProperties, m_softISP));
 
     // RCB image to get output from the RawPipeline
-    dwImageCUDA_create(&m_RCBImage, &m_rawOutputProperties, DW_IMAGE_CUDA_PITCH);
-    dwSoftISP_bindDemosaicOutput(&m_RCBImage, m_softISP);
+    CHECK_DW_ERROR(dwImage_create(&m_RCBImage, m_rawOutputProperties, m_ctx));
+    dwImageCUDA* RCB_cuda;
+    dwImage_getCUDA(&RCB_cuda, m_RCBImage);
+    dwSoftISP_bindOutputDemosaic(RCB_cuda, m_softISP);
 
     if (m_doTonemap) {
         dwImageProperties rgbProps = m_rawOutputProperties;
-        rgbProps.pxlFormat = DW_IMAGE_RGB;
-        rgbProps.pxlType = DW_TYPE_UINT8;
+        rgbProps.format = DW_IMAGE_FORMAT_RGB_UINT8_PLANAR;
 
-        dwImageCUDA_create(&m_RGBImage, &rgbProps, DW_IMAGE_CUDA_PITCH);
-        dwSoftISP_bindTonemapOutput(&m_RGBImage, m_softISP);
+        CHECK_DW_ERROR(dwImage_create(&m_RGBImage, rgbProps, m_ctx));
+        dwImageCUDA* RGB_cuda;
+        dwImage_getCUDA(&RGB_cuda, m_RGBImage);
+        dwSoftISP_bindOutputTonemap(RGB_cuda, m_softISP);
+    }
+}
+
+RawSimpleCamera::RawSimpleCamera(const dwImageFormat &outputISPFormat,
+        const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx, cudaStream_t stream,
+        dwCameraOutputType outputType, dwSoftISPDemosaicMethod demosaicMethod)
+    : RawSimpleCamera(params, sal, ctx, stream, outputType, demosaicMethod)
+{
+    if (DW_IMAGE_FORMAT_RGB_UINT8_PLANAR != outputISPFormat)
+    {
+        if (m_RGBImage)
+            CHECK_DW_ERROR(dwImage_destroy(&m_RGBImage));
+
+        if (m_doTonemap) {
+            dwImageProperties rgbProps = m_rawOutputProperties;
+            rgbProps.format = outputISPFormat;
+
+            CHECK_DW_ERROR(dwImage_create(&m_RGBImage, rgbProps, m_ctx));
+            dwImageCUDA* RGB_cuda;
+            dwImage_getCUDA(&RGB_cuda, m_RGBImage);
+            dwSoftISP_bindOutputTonemap(RGB_cuda, m_softISP);
+        }
+    }
+}
+
+RawSimpleCamera::RawSimpleCamera(const dwImageProperties &outputProperties, 
+        const dwSensorParams &params, dwSALHandle_t sal, dwContextHandle_t ctx, cudaStream_t stream,
+        dwCameraOutputType outputType, dwSoftISPDemosaicMethod demosaicMethod)
+    : RawSimpleCamera(params, sal, ctx, stream, outputType, demosaicMethod)
+{
+    if (m_outputProperties.format != outputProperties.format)
+    {
+        dwImageProperties newProperties = m_rawOutputProperties;
+        newProperties.format = outputProperties.format;
+
+        CHECK_DW_ERROR(dwImage_create(&m_converter_final, newProperties, ctx));
+        m_rawOutputProperties = newProperties;
     }
 }
 
 RawSimpleCamera::~RawSimpleCamera()
 {
+    if (m_converter_final) {
+        dwImage_destroy(&m_converter_final);
+    }
+
+    if (m_RCBImage) {
+        dwImage_destroy(&m_RCBImage);
+    }
+
+    if (m_RGBImage) {
+        dwImage_destroy(&m_RGBImage);
+    }
+
     dwSoftISP_release(&m_softISP);
 }
 
-dwImageGeneric *RawSimpleCamera::readFrame()
+dwImageHandle_t RawSimpleCamera::readFrame()
 {
     // see sample raw_pipeline for full use and explanation
-    dwImageCUDA* rawImageCUDA = GenericImage::toDW<dwImageCUDA>(SimpleCamera::readFrame());
+    dwImageHandle_t rawImage = SimpleCamera::readFrame();
 
-    if (rawImageCUDA == nullptr) {
+    if (rawImage == nullptr) {
         return nullptr;
     }
 
-    int32_t processType = DW_SOFT_ISP_PROCESS_TYPE_DEMOSAIC;
-    dwImageCUDA* output = &m_RCBImage;
+    int32_t processType = DW_SOFTISP_PROCESS_TYPE_DEMOSAIC;
+    dwImageHandle_t output = m_RCBImage;
     if (m_doTonemap) {
-        processType |= DW_SOFT_ISP_PROCESS_TYPE_TONEMAP;
-        output = &m_RGBImage;
+        processType |= DW_SOFTISP_PROCESS_TYPE_TONEMAP;
+        output = m_RGBImage;
     }
 
-    dwSoftISP_bindRawInput(rawImageCUDA, m_softISP);
-    CHECK_DW_ERROR(dwSoftISP_processDeviceAsync(processType, m_softISP));
+    dwImageCUDA* rawImageCUDA;
+    dwImage_getCUDA(&rawImageCUDA, rawImage);
+    dwSoftISP_bindInputRaw(rawImageCUDA, m_softISP);
 
-    return GenericImage::fromDW<dwImageCUDA>(output);
+    dwSoftISP_setProcessType(processType, m_softISP);
+    CHECK_DW_ERROR(dwSoftISP_processDeviceAsync(m_softISP));
+
+    dwImageHandle_t imgOutput = output;
+    if (m_converter_final)  {
+        dwImage_copyConvert(m_converter_final, imgOutput, m_ctx);
+        imgOutput = m_converter_final;
+    }
+
+    return imgOutput;
 }
 }
 }

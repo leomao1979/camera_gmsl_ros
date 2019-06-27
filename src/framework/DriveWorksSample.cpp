@@ -38,19 +38,15 @@
 #include <framework/DataPath.hpp>
 #include <framework/SimpleRenderer.hpp>
 
-#ifdef VIBRANTE
-#include <framework/WindowEGL.hpp>
-#endif
-
 // System includes
 #include <thread>
+#include <condition_variable>
 
 #if (!WINDOWS)
-#include <execinfo.h>
+#include <termios.h>
 #include <unistd.h>
 #include <csignal>
 #endif
-
 
 namespace dw_samples
 {
@@ -58,7 +54,7 @@ namespace common
 {
 
 //------------------------------------------------------------------------------
-DriveWorksSample* DriveWorksSample::g_instance  = nullptr;
+DriveWorksSample* DriveWorksSample::g_instance = nullptr;
 
 //------------------------------------------------------------------------------
 DriveWorksSample::DriveWorksSample(const ProgramArguments& args)
@@ -69,7 +65,9 @@ DriveWorksSample::DriveWorksSample(const ProgramArguments& args)
     , m_playSingleFrame(false)
     , m_reset(false)
     , m_runIterationPeriod(0)
-    , m_frameIdx(-1)
+    , m_frameIdx(0)
+    , m_stopFrameIdx(0)
+    , m_commandLineInputActive(false)
 {
     // ----------- Singleton -----------------
     if (g_instance)
@@ -78,7 +76,7 @@ DriveWorksSample::DriveWorksSample(const ProgramArguments& args)
 
     // ----------- Signals -----------------
     struct sigaction action = {};
-    action.sa_handler = DriveWorksSample::globalSigHandler;
+    action.sa_handler       = DriveWorksSample::globalSigHandler;
 
     sigaction(SIGHUP, &action, NULL);  // controlling terminal closed, Ctrl-D
     sigaction(SIGINT, &action, NULL);  // Ctrl-C
@@ -92,24 +90,22 @@ DriveWorksSample::DriveWorksSample(const ProgramArguments& args)
 }
 
 //------------------------------------------------------------------------------
-void DriveWorksSample::initializeWindow(const char *title, int width, int height, bool offscreen)
+void DriveWorksSample::initializeWindow(const char* title, int width, int height, bool offscreen, int samples)
 {
-    m_title     = title;
-    m_width     = width;
-    m_height    = height;
+    m_title  = title;
+    m_width  = width;
+    m_height = height;
 
     // -------------------------------------------
     // Initialize GL
     // -------------------------------------------
-#ifdef VIBRANTE
-    if (offscreen) {
-        m_window.reset(new WindowOffscreenEGL(m_width, m_height));
-    }
-#endif
-    if (!m_window) m_window.reset(new WindowGLFW(m_title.c_str(), m_width, m_height, offscreen));
+    m_window.reset(WindowBase::create(title, m_width, m_height, offscreen, samples));
 
     m_window->makeCurrent();
-    m_window->setOnKeypressCallback(processKeyCb);
+    m_window->setOnKeyDownCallback(keyDownCb);
+    m_window->setOnKeyUpCallback(keyUpCb);
+    m_window->setOnKeyRepeatCallback(keyRepeatCb);
+    m_window->setOnCharModsCallback(charModsCb);
     m_window->setOnMouseUpCallback(mouseUpCb);
     m_window->setOnMouseDownCallback(mouseDownCb);
     m_window->setOnMouseMoveCallback(mouseMoveCb);
@@ -120,70 +116,279 @@ void DriveWorksSample::initializeWindow(const char *title, int width, int height
     CHECK_GL_ERROR();
 }
 
+//------------------------------------------------------------------------------
+void DriveWorksSample::initializeCommandLineInput()
+{
+    m_commandLineInputActive = true;
+    m_commandLineInputThread = std::thread(&DriveWorksSample::readCLIKeyPressLoop, this);
+}
 
+//------------------------------------------------------------------------------
+char DriveWorksSample::readCommandLineChar()
+{
+    char buf           = 0;
+    struct termios old = {0};
+    // tcgetattr may have error on some shells
+    // if so, use cin which requires user to
+    // press return
+    if (tcgetattr(0, &old) < 0)
+    {
+        buf = static_cast<char>(std::cin.get());
+    }
+    else
+    {
+        old.c_lflag &= ~ICANON;
+        old.c_lflag &= ~ECHO;
+        old.c_cc[VMIN]  = 1;
+        old.c_cc[VTIME] = 0;
+        if (tcsetattr(0, TCSANOW, &old) < 0)
+            perror("tcsetattr ICANON");
+        if (read(STDIN_FILENO, &buf, 1) < 0)
+            perror("read()");
+        old.c_lflag |= ICANON;
+        old.c_lflag |= ECHO;
+        if (tcsetattr(0, TCSADRAIN, &old) < 0)
+            perror("tcsetattr ~ICANON");
+    }
+    return buf;
+}
 
+//------------------------------------------------------------------------------
+void DriveWorksSample::readCLIKeyPressLoop()
+{
+
+    int32_t key     = 0;
+    int32_t lastKey = -1;
+
+    timepoint_t start                     = myclock_t::now();
+    const uint64_t MAX_KEY_REPEAT_TIME_MS = 800;
+
+    while (shouldRun())
+    {
+        key = readCommandLineChar();
+        if (lastKey == -1)
+            start = myclock_t::now();
+
+        // Convert to ascii lower case if
+        // upper case character
+        if (key >= 'A' && key <= 'Z')
+        {
+            key -= ('A' - 'a');
+        }
+        // If key code was escape, convert to public escape
+        if (key == 27)
+        {
+            key = GLFW_KEY_ESCAPE;
+        }
+
+        uint64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  myclock_t::now() - start)
+                                  .count();
+        if (elapsed_ms < MAX_KEY_REPEAT_TIME_MS && key == lastKey)
+        {
+            keyRepeat(key, 0, 0);
+        }
+        else
+        {
+            keyDown(key, 0, 0);
+        }
+
+        lastKey = key;
+        start   = myclock_t::now();
+    }
+}
 
 //------------------------------------------------------------------------------
 bool DriveWorksSample::shouldRun()
 {
-    if (m_window) {
-        return !m_window->shouldClose() && m_run;
+    if (m_window)
+    {
+        return !m_window->shouldClose() && m_run &&
+               (m_frameIdx < m_stopFrameIdx || m_stopFrameIdx == 0);
     }
 
     return m_run;
 }
 
 //------------------------------------------------------------------------------
-void DriveWorksSample::setProcessRate(int loopsPerSecond)
+void DriveWorksSample::resume()
 {
-    m_runIterationPeriod = std::chrono::duration_cast<myclock_t::duration>(
-                std::chrono::nanoseconds(static_cast<std::chrono::nanoseconds::rep>(1e9 / loopsPerSecond)));
+    m_pause = false;
 }
 
 //------------------------------------------------------------------------------
-void DriveWorksSample::processKey(int key)
+void DriveWorksSample::pause()
 {
+    m_pause = true;
+}
+
+//------------------------------------------------------------------------------
+bool DriveWorksSample::isPaused() const
+{
+    return m_pause;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::reset()
+{
+    m_reset = true;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::stop()
+{
+    m_run = false;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::setProcessRate(int loopsPerSecond)
+{
+    if (loopsPerSecond <= 0)
+        m_runIterationPeriod = std::chrono::milliseconds(0);
+    else
+        m_runIterationPeriod = std::chrono::duration_cast<myclock_t::duration>(
+            std::chrono::nanoseconds(
+                static_cast<std::chrono::nanoseconds::rep>(1e9 / loopsPerSecond)));
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::setStopFrame(uint32_t stopFrame)
+{
+    m_stopFrameIdx = stopFrame;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::onSignal(int)
+{
+    if (m_commandLineInputActive)
+        log("Press any key to exit...\n");
+    stop();
+}
+
+//------------------------------------------------------------------------------
+float32_t DriveWorksSample::getCurrentFPS() const
+{
+    return m_currentFPS;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::keyDown(int key, int scancode, int mods)
+{
+
     // stop application
     if (key == GLFW_KEY_ESCAPE)
         m_run = false;
     else if (key == GLFW_KEY_SPACE)
         m_pause = !m_pause;
-    else if (key == GLFW_KEY_F5) {
+    else if (key == GLFW_KEY_F5)
+    {
         m_playSingleFrame = !m_playSingleFrame;
-        m_pause = m_playSingleFrame;
+        m_pause           = m_playSingleFrame;
     }
     else if (key == GLFW_KEY_R)
         m_reset = true;
 
-    onProcessKey(key);
+    onKeyDown(key, scancode, mods);
 }
 
 //------------------------------------------------------------------------------
-void DriveWorksSample::mouseDown(int button, float x, float y)
+void DriveWorksSample::keyUp(int key, int scancode, int mods)
+{
+    onKeyUp(key, scancode, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::keyRepeat(int key, int scancode, int mods)
+{
+    onKeyRepeat(key, scancode, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::charMods(unsigned int codepoint, int mods)
+{
+    onCharMods(codepoint, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::mouseDown(int button, float x, float y, int mods)
 {
     m_mouseView.mouseDown(button, x, y);
-    onMouseDown(button,x,y);
+    onMouseDown(button, x, y, mods);
 }
 
 //------------------------------------------------------------------------------
-void DriveWorksSample::mouseUp(int button, float x, float y)
+void DriveWorksSample::mouseUp(int button, float x, float y, int mods)
 {
     m_mouseView.mouseUp(button, x, y);
-    onMouseUp(button,x,y);
+    onMouseUp(button, x, y, mods);
 }
 
 //------------------------------------------------------------------------------
 void DriveWorksSample::mouseMove(float x, float y)
 {
     m_mouseView.mouseMove(x, y);
-    onMouseMove(x,y);
+    onMouseMove(x, y);
 }
 
 //------------------------------------------------------------------------------
 void DriveWorksSample::mouseWheel(float x, float y)
 {
     m_mouseView.mouseWheel(x, y);
-    onMouseWheel(x,y);
+    onMouseWheel(x, y);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::keyDownCb(int key, int scancode, int mods)
+{
+    instance()->keyDown(key, scancode, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::keyUpCb(int key, int scancode, int mods)
+{
+    instance()->keyUp(key, scancode, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::keyRepeatCb(int key, int scancode, int mods)
+{
+    instance()->keyRepeat(key, scancode, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::charModsCb(unsigned int codepoint, int mods)
+{
+    instance()->charMods(codepoint, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::mouseDownCb(int button, float x, float y, int mods)
+{
+    instance()->mouseDown(button, x, y, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::mouseUpCb(int button, float x, float y, int mods)
+{
+    instance()->mouseUp(button, x, y, mods);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::mouseMoveCb(float x, float y)
+{
+    instance()->mouseMove(x, y);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::mouseWheelCb(float x, float y)
+{
+    instance()->mouseWheel(x, y);
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::resizeCb(int width, int height)
+{
+    instance()->resize(width, height);
 }
 
 //------------------------------------------------------------------------------
@@ -196,22 +401,81 @@ void DriveWorksSample::resize(int width, int height)
 //------------------------------------------------------------------------------
 EGLDisplay DriveWorksSample::getEGLDisplay() const
 {
-    if (m_window) return m_window->getEGLDisplay();
+    if (m_window)
+        return m_window->getEGLDisplay();
     return 0;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::createSharedContext() const
+{
+    if (m_window)
+        m_window->createSharedContext();
+}
+
+//------------------------------------------------------------------------------
+WindowBase* DriveWorksSample::getWindow() const
+{
+    return m_window.get();
 }
 
 //------------------------------------------------------------------------------
 int DriveWorksSample::getWindowWidth() const
 {
-    if (m_window) return m_window->width();
+    if (m_window)
+        return m_window->width();
     return 0;
 }
 
 //------------------------------------------------------------------------------
 int DriveWorksSample::getWindowHeight() const
 {
-    if (m_window) return m_window->height();
+    if (m_window)
+        return m_window->height();
     return 0;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::setWindowSize(int width, int height)
+{
+    if (m_window)
+        m_window->setWindowSize(width, height);
+}
+
+//------------------------------------------------------------------------------
+bool DriveWorksSample::isOffscreen() const
+{
+    if (!m_window)
+        return true;
+    return m_window->isOffscreen();
+}
+
+//------------------------------------------------------------------------------
+const std::string& DriveWorksSample::getArgument(const char* name) const
+{
+    return m_args.get(name);
+}
+
+//------------------------------------------------------------------------------
+dw::common::ProfilerCUDA* DriveWorksSample::getProfilerCUDA()
+{
+    return &m_profiler;
+}
+
+//------------------------------------------------------------------------------
+MouseView3D& DriveWorksSample::getMouseView()
+{
+    return m_mouseView;
+}
+
+ProgramArguments& DriveWorksSample::getArgs()
+{
+    return m_args;
+}
+
+uint32_t DriveWorksSample::getFrameIndex() const
+{
+    return m_frameIdx;
 }
 
 //------------------------------------------------------------------------------
@@ -221,17 +485,21 @@ void DriveWorksSample::tryToSleep()
     auto timeSinceUpdate = myclock_t::now() - m_lastRunIterationTime;
 
     // Count FPS
-    if(!m_pause)
+    if (!m_pause)
     {
         m_fpsBuffer[m_fpsSampleIdx] = timeSinceUpdate.count();
-        m_fpsSampleIdx = (m_fpsSampleIdx + 1) % FPS_BUFFER_SIZE;
+        m_fpsSampleIdx              = (m_fpsSampleIdx + 1) % FPS_BUFFER_SIZE;
 
         float32_t totalTime = 0;
-        for(uint32_t i=0; i<FPS_BUFFER_SIZE; i++)
+        for (uint32_t i = 0; i < FPS_BUFFER_SIZE; i++)
             totalTime += m_fpsBuffer[i];
 
-        myclock_t::duration meanTime(static_cast<myclock_t::duration::rep>(totalTime/FPS_BUFFER_SIZE));
-        m_currentFPS = 1e6f / static_cast<float32_t>(std::chrono::duration_cast<std::chrono::microseconds>(meanTime).count());
+        myclock_t::duration meanTime(static_cast<myclock_t::duration::rep>(
+            totalTime / FPS_BUFFER_SIZE));
+        m_currentFPS = 1e6f / static_cast<float32_t>(
+                                  std::chrono::duration_cast<std::chrono::microseconds>(
+                                      meanTime)
+                                      .count());
     }
 
     // Limit framerate, sleep if necessary
@@ -247,12 +515,32 @@ void DriveWorksSample::tryToSleep()
 }
 
 //------------------------------------------------------------------------------
+DriveWorksSample* DriveWorksSample::instance()
+{
+    return g_instance;
+}
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::globalSigHandler(int sig)
+{
+    instance()->onSignal(sig);
+}
+
+
+//------------------------------------------------------------------------------
+void DriveWorksSample::onReset()
+{
+    m_frameIdx = 0;
+}
+
+//------------------------------------------------------------------------------
 int DriveWorksSample::run()
 {
-    if (!onInitialize()) return -1;
+    if (!onInitialize())
+        return -1;
 
     // Main program loop
-    m_run = true;
+    m_run                  = true;
     m_lastRunIterationTime = myclock_t::now() - m_runIterationPeriod;
 
     while (shouldRun())
@@ -266,27 +554,34 @@ int DriveWorksSample::run()
         // Iteration
         if (!m_pause)
         {
-            m_frameIdx++;
-
+            m_profiler.tic("onProcess", true);
             onProcess();
+            m_profiler.toc();
+
             if (m_playSingleFrame)
                 m_pause = true;
-        }else{
+        }
+        else
+        {
             onPause();
         }
 
-        // if we expect to slow down the execution of the code
-        if (m_runIterationPeriod != myclock_t::duration::zero())
-        {
-            tryToSleep();
-        }
+        // Count fps and maybe sleep
+        tryToSleep();
 
         if (shouldRun() && !m_reset && m_window)
         {
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            m_profiler.tic("onRender", true);
             onRender();
-
+            m_profiler.toc();
             m_window->swapBuffers();
         }
+
+        m_profiler.collectTimers();
+
+        if(!m_pause)
+            m_frameIdx++;
     }
 
     // Show timings
@@ -295,16 +590,17 @@ int DriveWorksSample::run()
         m_profiler.collectTimers();
 
         std::stringstream ss;
-        ss << "Timing results:\n" << m_profiler << "\n";
+        ss << "Timing results:\n"
+           << m_profiler << "\n";
         std::cout << ss.str();
-        //log(DW_LOG_VERBOSE, ss.str().c_str());
     }
 
     onRelease();
 
+    if (m_commandLineInputActive)
+        m_commandLineInputThread.join();
+
     return 0;
 }
-
-
 }
 }

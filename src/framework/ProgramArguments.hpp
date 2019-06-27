@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_PROGRAMARGUMENTS_HPP__
-#define SAMPLES_COMMON_PROGRAMARGUMENTS_HPP__
+#ifndef SAMPLES_COMMON_PROGRAMARGUMENTS_HPP_
+#define SAMPLES_COMMON_PROGRAMARGUMENTS_HPP_
 
 #include <map>
 #include <string>
@@ -108,7 +108,7 @@ class ProgramArguments
     void addOption(const Option_t &newOption);
 
     const std::string &get(const char *name) const;
-    void set(const char* option, const char* vaule);
+    void set(const char* option, const char* value);
 
     // Will be shown before the help text
     void setDescription(const char* description);
@@ -129,4 +129,4 @@ class ProgramArguments
     std::map<std::string, Option_t> arguments;
 };
 
-#endif // SAMPLES_COMMON_PROGRAMARGUMENTS_HPP__
+#endif // SAMPLES_COMMON_PROGRAMARGUMENTS_HPP_

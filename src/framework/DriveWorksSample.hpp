@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef DRIVEWORKSSAMPLE_HPP__
-#define DRIVEWORKSSAMPLE_HPP__
+#ifndef DRIVEWORKSSAMPLE_HPP_
+#define DRIVEWORKSSAMPLE_HPP_
 
 // C++ Std
 #include <memory>
@@ -45,6 +45,8 @@
 #include "Checks.hpp"
 #include "Log.hpp"
 #include <framework/DataPath.hpp>
+#include "ScreenshotHelper.hpp"
+#include "RenderUtils.hpp"
 
 namespace dw_samples
 {
@@ -59,11 +61,11 @@ namespace common
 */
 class DriveWorksSample
 {
-  public:
-
+public:
     //! initialize application (default is console mode, no GL context)
     DriveWorksSample(const ProgramArguments& args);
-    virtual ~DriveWorksSample() { }
+
+    virtual ~DriveWorksSample() {}
 
     /**
      * Initialize window application. This will also create a valid GL context.
@@ -71,8 +73,14 @@ class DriveWorksSample
      * @param windowTitle, width, height Properties for the created window.
      * @param offscreen If true window will not be created, but full GL initialization happens.
      *                  Rendering will happen into an offscreen window.
+     * @param samples   Specifies the desired number of samples to use for subsampling
      **/
-    void initializeWindow(const char *windowTitle, int width, int height, bool offscreen = false);
+    void initializeWindow(const char* windowTitle, int width, int height, bool offscreen = false, int samples = 0);
+
+    /**
+     * @brief Run background thread to capture key input.
+     */
+    void initializeCommandLineInput();
 
     /**
     * Starts the main loop. Frame-rate is limited to whatever is specified by setProcessRate().
@@ -94,22 +102,27 @@ class DriveWorksSample
     /**
      * @brief resume Call to resume the app programatically.
      */
-    void resume() { m_pause = false; }
+    void resume();
 
     /**
      * @brief pause Call to pause the app programatically.
      */
-    void pause() { m_pause = true; }
+    void pause();
+
+    /**
+     * @brief isPaused Call to test if app is paused.
+     */
+    bool isPaused() const;
 
     /**
      * @brief reset Call to reset the app programatically.
      */
-    void reset() { m_reset = true; }
+    void reset();
 
     /**
-     * @brief reset Call to reset the app programatically.
+     * @brief stop Call to stop the app programatically.
      */
-    void stop()  { m_run = false; }
+    void stop();
 
     /**
      * @brief setProcessRate This controls how fast the process callback is called.
@@ -120,6 +133,13 @@ class DriveWorksSample
      * @note If loopsPerSecond is 0 then no limitation happens.
      */
     void setProcessRate(int loopsPerSecond);
+
+    /**
+     * @brief setStopFrame Sets the frame number indicating when to stop running the sample
+     * @param stopFrame frame number on which the sample should stop
+     * @note if stopFrame is 0 the sample keeps running indefinitely (or until other stop conditions are reached)
+     */
+    void setStopFrame(uint32_t stopFrame);
 
     // ------------------------   Callbacks ----------------------------
     /**
@@ -148,7 +168,7 @@ class DriveWorksSample
     /**
      * @brief onReset Called in the main loop if reset has been requested
      */
-    virtual void onReset() {}
+    virtual void onReset();
 
     /**
      * @brief onRender Called in the main loop even when paused.
@@ -159,71 +179,153 @@ class DriveWorksSample
     /**
      * @brief onResize called on any event when window size changed
      */
-    virtual void onResizeWindow(int width, int height) { (void)width; (void)height; }
+    virtual void onResizeWindow(int width, int height)
+    {
+        (void)width;
+        (void)height;
+    }
+
+    /// overload these methods to react on different events
+    virtual void onKeyDown(int key, int scancode, int mods)
+    {
+        (void)key;
+        (void)scancode;
+        (void)mods;
+    }
+    virtual void onKeyUp(int key, int scancode, int mods)
+    {
+        (void)key;
+        (void)scancode;
+        (void)mods;
+    }
+    virtual void onKeyRepeat(int key, int scancode, int mods)
+    {
+        (void)key;
+        (void)scancode;
+        (void)mods;
+    }
+    virtual void onCharMods(unsigned int codepoint, int mods)
+    {
+        (void)codepoint;
+        (void)mods;
+    }
+    virtual void onMouseDown(int button, float x, float y, int mods)
+    {
+        (void)button;
+        (void)x;
+        (void)y;
+        (void)mods;
+    }
+    virtual void onMouseUp(int button, float x, float y, int mods)
+    {
+        (void)button;
+        (void)x;
+        (void)y;
+        (void)mods;
+    }
+    virtual void onMouseMove(float x, float y)
+    {
+        (void)x;
+        (void)y;
+    }
+    virtual void onMouseWheel(float x, float y)
+    {
+        (void)x;
+        (void)y;
+    }
 
     /**
      * @brief onSignal The signal handler.
      * @param sig The signal.
      */
-    virtual void onSignal(int /*sig*/) { stop(); }
+    virtual void onSignal(int /*sig*/);
 
-
-    // ------------------------   Window ad properties ----------------------------
-    float32_t getCurrentFPS() const  { return m_currentFPS; }
+    float32_t getCurrentFPS() const;
 
     EGLDisplay getEGLDisplay() const;
+
+    void createSharedContext() const;
+
+    WindowBase* getWindow() const;
+
     int getWindowWidth() const;
+
     int getWindowHeight() const;
 
-    const std::string& getArgument(const char* name) const { return m_args.get(name); }
+    void setWindowSize(int width, int height);
 
-    /// overload these methods to react on different events
-    virtual void onProcessKey      (int key) { (void) key; }
-    virtual void onMouseDown       (int button, float x, float y) { (void)button; (void)x; (void)y; }
-    virtual void onMouseUp         (int button, float x, float y) { (void)button; (void)x; (void)y; }
-    virtual void onMouseMove       (float x, float y) { (void)x; (void)y; }
-    virtual void onMouseWheel      (float x, float y) { (void)x; (void)y; }
+    bool isOffscreen() const;
+
+    const std::string& getArgument(const char* name) const;
 
 protected:
+    dw::common::ProfilerCUDA* getProfilerCUDA();
 
-    // ------------------------------------------------
-    // Internal properties
-    // ------------------------------------------------
-    dw::common::ProfilerCUDA m_profiler;
-    ProgramArguments         m_args;
-    volatile bool            m_run;
-    volatile bool            m_pause;
-    volatile bool            m_playSingleFrame;
-    volatile bool            m_reset;
+    MouseView3D& getMouseView();
 
-    // ------------------------------------------------
-    // Time
-    // ------------------------------------------------
+    ProgramArguments& getArgs();
+
+    uint32_t getFrameIndex() const;
+
+    static DriveWorksSample* instance();
+
+private:
+
+    static void globalSigHandler(int sig);
+
+    virtual void resize(int width, int height);
+
+    virtual void keyDown(int key, int scancode, int mods);
+
+    virtual void keyUp(int key, int scancode, int mods);
+
+    virtual void keyRepeat(int key, int scancode, int mods);
+
+    virtual void charMods(unsigned int codepoint, int mods);
+
+    virtual void mouseDown(int button, float x, float y, int mods);
+
+    virtual void mouseUp(int button, float x, float y, int mods);
+
+    virtual void mouseMove(float x, float y);
+
+    virtual void mouseWheel(float x, float y);
+
+    static void keyDownCb(int key, int scancode, int mods);
+
+    static void keyUpCb(int key, int scancode, int mods);
+
+    static void keyRepeatCb(int key, int scancode, int mods);
+
+    static void charModsCb(unsigned int codepoint, int mods);
+
+    static void mouseDownCb(int button, float x, float y, int mods);
+
+    static void mouseUpCb(int button, float x, float y, int mods);
+
+    static void mouseMoveCb(float x, float y);
+
+    static void mouseWheelCb(float x, float y);
+
+    static void resizeCb(int width, int height);
+
+    static char readCommandLineChar();
+
+    void readCLIKeyPressLoop();
+
+protected:
     typedef std::chrono::high_resolution_clock myclock_t;
+
     typedef std::chrono::time_point<myclock_t> timepoint_t;
-    
-    myclock_t::duration m_runIterationPeriod; /// Defines the minimum time between calls to draw()
-    timepoint_t m_lastRunIterationTime;
-    uint32_t m_frameIdx;
 
-    void tryToSleep();  /// slow down execution of the code to limit to the given process rate
+private:
+    dw::common::ProfilerCUDA m_profiler;
+    ProgramArguments m_args;
 
-    // ------------------------------------------------
-    // FPS calculation
-    // ------------------------------------------------
-    // Ring buffer to store fps samples
-    static const uint32_t FPS_BUFFER_SIZE = 10;
-    float32_t m_fpsBuffer[FPS_BUFFER_SIZE] {};
-    uint32_t  m_fpsSampleIdx = 0;
-    float32_t m_currentFPS   = 0;
-
-    // ------------------------------------------------
-    // singleton
-    // ------------------------------------------------
-    static DriveWorksSample*   g_instance;
-
-    static DriveWorksSample* instance() { return g_instance; }
-    static void globalSigHandler(int sig) { instance()->onSignal(sig); }
+    volatile bool m_run;
+    volatile bool m_pause;
+    volatile bool m_playSingleFrame;
+    volatile bool m_reset;
 
     // ------------------------------------------------
     // Graphics and UI interface
@@ -232,28 +334,39 @@ protected:
     MouseView3D m_mouseView;
 
     std::string m_title;
-    int  m_width;
-    int  m_height;
+    int m_width;
+    int m_height;
 
+    // ------------------------------------------------
+    // Time
+    // ------------------------------------------------
+    /// Defines the minimum time between calls to draw()
+    myclock_t::duration m_runIterationPeriod;
+    timepoint_t m_lastRunIterationTime;
+    uint32_t m_frameIdx;
+    uint32_t m_stopFrameIdx;
 
-    virtual void resize          (int width, int height);
-    virtual void processKey      (int key);
-    virtual void mouseDown       (int button, float x, float y);
-    virtual void mouseUp         (int button, float x, float y);
-    virtual void mouseMove       (float x, float y);
-    virtual void mouseWheel      (float x, float y);
+    /// slow down execution of the code to limit to the given process rate
+    void tryToSleep();
 
-    static void processKeyCb     (int key)                      { instance()->processKey(key); }
-    static void mouseDownCb      (int button, float x, float y) { instance()->mouseDown(button, x, y); }
-    static void mouseUpCb        (int button, float x, float y) { instance()->mouseUp(button, x, y); }
-    static void mouseMoveCb      (float x, float y)             { instance()->mouseMove(x, y); }
-    static void mouseWheelCb     (float x, float y)             { instance()->mouseWheel(x, y); }
-    static void resizeCb         (int width, int height)        { instance()->resize(width, height); }
+    // ------------------------------------------------
+    // FPS calculation
+    // ------------------------------------------------
+    // Ring buffer to store fps samples
+    static const uint32_t FPS_BUFFER_SIZE = 10;
+    float32_t m_fpsBuffer[FPS_BUFFER_SIZE]{};
+    uint32_t m_fpsSampleIdx = 0;
+    float32_t m_currentFPS  = 0.0f;
 
+    std::thread m_commandLineInputThread;
+    bool m_commandLineInputActive;
+
+    // ------------------------------------------------
+    // singleton
+    // ------------------------------------------------
+    static DriveWorksSample* g_instance;
 };
-
-
 }
 }
 
-#endif // DRIVEWORKSAPP_HPP__
+#endif // DRIVEWORKSAPP_HPP_

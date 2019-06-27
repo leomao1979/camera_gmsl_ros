@@ -6,8 +6,8 @@
  * distribution of this software and related documentation without an express
  * license agreement from NVIDIA CORPORATION is strictly prohibited.
  */
-#ifndef SAMPLES_COMMON_CUDATIMER_HPP__
-#define SAMPLES_COMMON_CUDATIMER_HPP__
+#ifndef SAMPLES_COMMON_CUDATIMER_HPP_
+#define SAMPLES_COMMON_CUDATIMER_HPP_
 
 #include <driver_types.h>
 #include <cuda_runtime.h>
@@ -73,4 +73,4 @@ private:
 } // namespace testing
 } // namespace dw
 
-#endif // TESTS_COMMON_CUDATIMER_HPP__
+#endif // TESTS_COMMON_CUDATIMER_HPP_

@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_GRID_HPP__
-#define SAMPLES_COMMON_GRID_HPP__
+#ifndef SAMPLES_COMMON_GRID_HPP_
+#define SAMPLES_COMMON_GRID_HPP_
 
 #include <stdint.h>
 #include <dw/renderer/Renderer.h>
@@ -55,4 +55,4 @@ void gridCellRect(dwRect *rect,
               const GridData_t &grid,
               uint32_t cellIdx);
 
-#endif // SAMPLES_COMMON_GRID_HPP__
+#endif // SAMPLES_COMMON_GRID_HPP_

@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_CONSOLECOLOR_HPP__
-#define SAMPLES_COMMON_CONSOLECOLOR_HPP__
+#ifndef SAMPLES_COMMON_CONSOLECOLOR_HPP_
+#define SAMPLES_COMMON_CONSOLECOLOR_HPP_
 
 #include <stdio.h>
 #include <dw/core/Logger.h>
@@ -49,4 +49,4 @@ void logWarn(const char* format, ...);
 void log(const char* format, ...);
 
 
-#endif // SAMPLES_COMMON_CONSOLECOLOR_HPP__
+#endif // SAMPLES_COMMON_CONSOLECOLOR_HPP_

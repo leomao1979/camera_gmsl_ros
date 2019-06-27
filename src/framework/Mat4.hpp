@@ -28,8 +28,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SAMPLES_COMMON_MAT4_HPP__
-#define SAMPLES_COMMON_MAT4_HPP__
+#ifndef SAMPLES_COMMON_MAT4_HPP_
+#define SAMPLES_COMMON_MAT4_HPP_
 
 #include <string.h>
 #include <math.h>
@@ -179,4 +179,4 @@ inline void Mat4_AxBinv(float res[16], const float A[16], const float B[16])
     Mat4_RenormR(res);
 }
 
-#endif // SAMPLES_COMMON_MAT4_HPP__
+#endif // SAMPLES_COMMON_MAT4_HPP_

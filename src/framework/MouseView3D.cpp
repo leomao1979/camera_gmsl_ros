@@ -30,6 +30,7 @@
 
 #include "MouseView3D.hpp"
 #include <math.h>
+#include <algorithm>
 #include "MathUtils.hpp"
 #include "Mat4.hpp"
 
@@ -37,7 +38,7 @@ MouseView3D::MouseView3D()
     : m_windowAspect(1.0f)
     , m_fovRads(DEG2RAD(60.0f))
     , m_zNear(0.1f)
-    , m_zFar(1000.f)
+    , m_zFar(10000.f)
     , m_radius(8)
     , m_mouseLeft(false)
     , m_mouseRight(false)
@@ -101,12 +102,8 @@ void MouseView3D::mouseMove(float x, float y)
         m_angles[0] = m_startAngles[0] - 0.01f * (pos[0] - m_currentPos[0]);
         m_angles[1] = m_startAngles[1] + 0.01f * (pos[1] - m_currentPos[1]);
 
-        // Limit the vertical angle (5 to 85 degrees)
-        if (m_angles[1] > DEG2RAD(85))
-            m_angles[1] = DEG2RAD(85);
-
-        if (m_angles[0] < DEG2RAD(5))
-            m_angles[0] = DEG2RAD(5);
+        // Limit the vertical angle (-30 to 85 degrees)
+        m_angles[1] = std::max(std::min(m_angles[1], DEG2RAD(85)), DEG2RAD(-30));
 
         updateEye();
         updateMatrices();
@@ -135,10 +132,7 @@ void MouseView3D::mouseWheel(float dx, float dy)
 
     float tmpRadius = m_radius - dy * 1.5f;
 
-    if (tmpRadius > 0.0f) {
-        m_radius = tmpRadius;
-        updateEye();
-    }
+    setRadiusFromCenter(tmpRadius);
 }
 
 void MouseView3D::setWindowAspect(float aspect)
@@ -156,6 +150,14 @@ void MouseView3D::setCenter(float x, float y, float z)
     updateMatrices();
 }
 
+void MouseView3D::setRadiusFromCenter(float zoom)
+{
+    if (zoom > 0.0f) {
+        m_radius = zoom;
+        updateEye();
+        updateMatrices();
+    }
+}
 void MouseView3D::updateMatrices()
 {
     lookAt(m_modelView, m_eye, m_center, m_up);
