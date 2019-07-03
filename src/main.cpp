@@ -53,7 +53,14 @@
 #include <framework/DataPath.hpp>
 #include <framework/WindowGLFW.hpp>
 
+#include <ros/ros.h>
+#include "LMImagePublisher.hpp"
+
+using namespace std;
 using namespace dw_samples::common;
+
+static const string ROS_TOPIC_IMAGE = "/camera/image";
+static const string ROS_TOPIC_IMAGE_COMPRESSED = "/camera/image/compressed";
 
 ///------------------------------------------------------------------------------
 ///------------------------------------------------------------------------------
@@ -69,6 +76,9 @@ private:
     dwRendererHandle_t m_renderer            = DW_NULL_HANDLE;
 
     std::unique_ptr<ScreenshotHelper> m_screenshot;
+
+    LMImagePublisher *m_imagePublisher = nullptr;
+
 public:
 
     dwSoftISPHandle_t m_isp = DW_NULL_HANDLE;
@@ -83,6 +93,7 @@ public:
 
     dwImageHandle_t m_rgbaImage = DW_NULL_HANDLE;
     dwImageCUDA* m_rgbaCUDAImage;
+    dwImageHandle_t m_rgbImage  = DW_NULL_HANDLE;
 
     uint32_t m_ispOutput;
 
@@ -251,6 +262,11 @@ public:
             CHECK_DW_ERROR(dwImage_getCUDA(&m_rgbaCUDAImage, m_rgbaImage));
             CHECK_DW_ERROR(dwSoftISP_bindOutputTonemap(m_rgbaCUDAImage, m_isp));
 
+            // alloate the rgb image
+            dwImageProperties rgbImageProperties = rgbaImageProperties;
+            rgbImageProperties.format = DW_IMAGE_FORMAT_RGB_UINT8;
+            CHECK_DW_ERROR(dwImage_create(&m_rgbImage, rgbImageProperties, m_sdk));
+
             CHECK_DW_ERROR(dwImageStreamer_initialize(&m_streamerCUDAtoGL, &rgbaImageProperties, DW_IMAGE_GL, m_sdk));
         }
 
@@ -273,6 +289,18 @@ public:
                 CHECK_DW_ERROR(dwSensorSerializer_initialize(&m_serializer, &serializerParams, m_camera));
                 CHECK_DW_ERROR(dwSensorSerializer_start(m_serializer));
             }
+        }
+
+        //--------------------------------------------------------------------------
+        // initializes ROS publisher
+        // -------------------------------------------------------------------------
+        {
+            bool compress_mode = false;
+            string rosTopic = getArgument("ros-topic");
+            if (rosTopic.find(ROS_TOPIC_IMAGE_COMPRESSED) == 0) {
+                compress_mode = true; 
+            }
+            m_imagePublisher = new LMImagePublisher(rosTopic, compress_mode);
         }
 
         return true;
@@ -328,6 +356,7 @@ public:
         dwTime_t timeout = 66000;
 
         // read from camera
+        ros::Time stamp = ros::Time::now();
         uint32_t cameraSiblingID = 0;
         dwCameraFrameHandle_t frame;
         CHECK_DW_ERROR(dwSensorCamera_readFrame(&frame, cameraSiblingID, timeout, m_camera));
@@ -359,6 +388,12 @@ public:
                                                     m_isp));
         CHECK_DW_ERROR(dwSoftISP_processDeviceAsync(m_isp));
 
+        // Publish RGB image to ROS
+        CHECK_DW_ERROR(dwImage_copyConvert(m_rgbImage, m_rgbaImage, m_sdk));
+        dwImageCUDA* rgbImageCUDA;
+        CHECK_DW_ERROR(dwImage_getCUDA(&rgbImageCUDA, m_rgbImage));
+        publish_image(*rgbImageCUDA, stamp);
+
         // stream that tonamap image to the GL domain
         CHECK_DW_ERROR(dwImageStreamer_producerSend(m_rgbaImage, m_streamerCUDAtoGL));
 
@@ -381,6 +416,12 @@ public:
 
         // return frame
         CHECK_DW_ERROR(dwSensorCamera_returnFrame(&frame));
+    }
+
+    void publish_image(dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
+        std::vector<uint8_t> cpuData;
+        cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
+        m_imagePublisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
     }
 
     void onKeyDown(int key, int scancode, int mods) override
@@ -416,8 +457,18 @@ int main(int argc, const char **argv)
         ProgramArguments::Option_t("tegra-slave", "0", "Optional parameter used only for Tegra B, enables slave mode."),
         ProgramArguments::Option_t("camera-fifo-size", "3", "Size of the internal camera fifo (minimum 3). "
                               "A larger value might be required during recording due to slowdown"),
+        ProgramArguments::Option_t("ros-topic", ""),
+        ProgramArguments::Option_t("node-name", ""),
+        ProgramArguments::Option_t("offscreen", "false"),
 
     }, "DriveWorks camera GMSL Raw sample");
+
+    string nodeName = args.get("node0name");
+    if (nodeName == "") {
+        nodeName = "gmsl_camera_image_publisher";     
+    }
+    cout << "nodeName: " << nodeName << endl;
+    ros::init(argc, const_cast<char **>(argv), nodeName);
 
     // -------------------
     // initialize and start a window application (with offscreen support if required)

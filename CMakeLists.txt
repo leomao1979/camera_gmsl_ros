@@ -31,6 +31,7 @@ include(SamplesInstallConfiguration)
 #-------------------------------------------------------------------------------
 # Driveworks SDK
 #-------------------------------------------------------------------------------
+set(DRIVEWORKS_DIR /usr/local/driveworks)
 find_package(Driveworks REQUIRED)
 include_directories(${Driveworks_INCLUDE_DIR})
 list(APPEND Driveworks_LIBRARIES ${CUDA_LIBRARIES} ${CUDA_cublas_LIBRARY})
