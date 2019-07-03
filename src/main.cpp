@@ -463,7 +463,7 @@ int main(int argc, const char **argv)
 
     }, "DriveWorks camera GMSL Raw sample");
 
-    string nodeName = args.get("node0name");
+    string nodeName = args.get("nodeName");
     if (nodeName == "") {
         nodeName = "gmsl_camera_image_publisher";     
     }
