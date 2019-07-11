@@ -451,6 +451,12 @@ bool DriveWorksSample::isOffscreen() const
 }
 
 //------------------------------------------------------------------------------
+bool DriveWorksSample::enabled(const char* name) const
+{
+    return m_args.enabled(name);
+}
+
+//------------------------------------------------------------------------------
 const std::string& DriveWorksSample::getArgument(const char* name) const
 {
     return m_args.get(name);

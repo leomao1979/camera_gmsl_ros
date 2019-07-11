@@ -256,6 +256,8 @@ public:
 
     bool isOffscreen() const;
 
+    bool enabled(const char* name) const;
+
     const std::string& getArgument(const char* name) const;
 
 protected:

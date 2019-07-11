@@ -59,9 +59,6 @@
 using namespace std;
 using namespace dw_samples::common;
 
-static const string ROS_TOPIC_IMAGE = "/camera/image";
-static const string ROS_TOPIC_IMAGE_COMPRESSED = "/camera/image/compressed";
-
 ///------------------------------------------------------------------------------
 ///------------------------------------------------------------------------------
 class CameraGMSLRawSample : public DriveWorksSample
@@ -295,12 +292,7 @@ public:
         // initializes ROS publisher
         // -------------------------------------------------------------------------
         {
-            bool compress_mode = false;
-            string rosTopic = getArgument("ros-topic");
-            if (rosTopic.find(ROS_TOPIC_IMAGE_COMPRESSED) == 0) {
-                compress_mode = true; 
-            }
-            m_imagePublisher = new LMImagePublisher(rosTopic, compress_mode);
+            m_imagePublisher = new LMImagePublisher(getArgument("ros-topic"), enabled("compressed"));
         }
 
         return true;
@@ -421,6 +413,7 @@ public:
     void publish_image(dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
         std::vector<uint8_t> cpuData;
         cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
+        cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
         m_imagePublisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
     }
 
@@ -457,17 +450,16 @@ int main(int argc, const char **argv)
         ProgramArguments::Option_t("tegra-slave", "0", "Optional parameter used only for Tegra B, enables slave mode."),
         ProgramArguments::Option_t("camera-fifo-size", "3", "Size of the internal camera fifo (minimum 3). "
                               "A larger value might be required during recording due to slowdown"),
-        ProgramArguments::Option_t("ros-topic", ""),
-        ProgramArguments::Option_t("node-name", ""),
-        ProgramArguments::Option_t("offscreen", "false"),
+        ProgramArguments::Option_t("ros-topic",  "/camera/image"),
+        ProgramArguments::Option_t("node-name",  "gmsl_camera_raw_publisher"),
+        ProgramArguments::Option_t("offscreen",  "false"),
+        ProgramArguments::Option_t("compressed", "false"),
 
     }, "DriveWorks camera GMSL Raw sample");
 
     string nodeName = args.get("node-name");
-    if (nodeName == "") {
-        nodeName = "gmsl_camera_image_publisher";     
-    }
     cout << "nodeName: " << nodeName << endl;
+    cout << "ros-topic: " << args.get("ros-topic") << endl;
     ros::init(argc, const_cast<char **>(argv), nodeName);
 
     // -------------------
