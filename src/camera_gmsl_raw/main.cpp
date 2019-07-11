@@ -54,6 +54,7 @@
 #include <framework/WindowGLFW.hpp>
 
 #include <ros/ros.h>
+#include <libgpujpeg/gpujpeg.h>
 #include "LMImagePublisher.hpp"
 
 using namespace std;
@@ -73,6 +74,10 @@ private:
     dwRendererHandle_t m_renderer            = DW_NULL_HANDLE;
 
     std::unique_ptr<ScreenshotHelper> m_screenshot;
+
+    struct gpujpeg_encoder *m_jpegEncoder = nullptr;
+    struct gpujpeg_parameters m_gpujpeg_param;
+    struct gpujpeg_image_parameters m_gpujpeg_param_image;
 
     LMImagePublisher *m_imagePublisher = nullptr;
 
@@ -222,6 +227,7 @@ public:
         // initializes camera
         // - the SensorCamera module
         // -----------------------------------------
+        dwImageProperties rgbImageProperties {};
         {
             // we need to allocate memory for a demosaic image and bind it to the ISP
             dwImageProperties rcbProperties{};
@@ -260,7 +266,7 @@ public:
             CHECK_DW_ERROR(dwSoftISP_bindOutputTonemap(m_rgbaCUDAImage, m_isp));
 
             // alloate the rgb image
-            dwImageProperties rgbImageProperties = rgbaImageProperties;
+            rgbImageProperties = rgbaImageProperties;
             rgbImageProperties.format = DW_IMAGE_FORMAT_RGB_UINT8;
             CHECK_DW_ERROR(dwImage_create(&m_rgbImage, rgbImageProperties, m_sdk));
 
@@ -410,11 +416,70 @@ public:
         CHECK_DW_ERROR(dwSensorCamera_returnFrame(&frame));
     }
 
+    void initGPUJpegEncoder(uint32_t width, uint32_t height) {
+    	// init jpeg encoder
+        gpujpeg_set_default_parameters(&m_gpujpeg_param);  // quality:75, restart int:8, interleaved:0
+        m_gpujpeg_param.quality = 80;
+        m_gpujpeg_param.restart_interval = 8;
+        m_gpujpeg_param.interleaved = 1;  
+
+        gpujpeg_image_set_default_parameters(&m_gpujpeg_param_image);
+        m_gpujpeg_param_image.width = width;
+   	    m_gpujpeg_param_image.height = height;
+        m_gpujpeg_param_image.comp_count = 3;
+        // (for now, it must be 3)
+        m_gpujpeg_param_image.color_space = GPUJPEG_RGB;
+        m_gpujpeg_param_image.pixel_format = GPUJPEG_444_U8_P012;
+
+        m_jpegEncoder = gpujpeg_encoder_create(NULL);
+        if (m_jpegEncoder == NULL) {
+            std::cout << "Failed to create gpujpeg encoder!" << std::endl;
+        }
+
+        gpujpeg_print_devices_info();
+        int gpu_device_id = 0;
+        int retcode = gpujpeg_init_device(gpu_device_id, 0);
+        if (retcode != 0) {
+            std::cout << "Failed to init device. Ret code: " << retcode << std::endl;
+            return;
+        }
+    } 
+
     void publish_image(dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
-        std::vector<uint8_t> cpuData;
-        cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
-        cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
-        m_imagePublisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
+        if (m_jpegEncoder == nullptr) {
+            std::vector<uint8_t> cpuData;
+            cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
+            cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
+            m_imagePublisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
+        } else {
+            // Compress with lodepng
+            // std::vector<uint8_t> cpuData;
+            // cpuData.resize(rgbImage.prop.width * rgbImage.prop.height * 3);
+            // cudaMemcpy2D(cpuData.data(), rgbImage.prop.width*3, rgbImage.dptr[0], rgbImage.pitch[0], rgbImage.prop.width*3, rgbImage.prop.height, cudaMemcpyDeviceToHost);
+            // unsigned char* compressed_image = NULL;
+            // size_t compressed_image_size = 0;
+            // lodepng_encode24(&compressed_image, &compressed_image_size, cpuData.data(), rgbImage.prop.width, rgbImage.prop.height);
+
+            // Compress with libgpujpeg
+            timepoint_t t0 = myclock_t::now();
+            uint8_t* compressed_image = nullptr;
+            int compressed_image_size = 0;
+            struct gpujpeg_encoder_input encoder_input;
+            gpujpeg_encoder_input_set_image(&encoder_input, reinterpret_cast<uint8_t*>(rgbImageCUDA.dptr[0]));
+            int retcode = gpujpeg_encoder_encode(m_jpegEncoder, &m_gpujpeg_param, &m_gpujpeg_param_image, &encoder_input, &compressed_image, &compressed_image_size);
+            if (retcode != 0) {
+                cerr << "Failed to encode. Error code: " << retcode << endl;
+                return;
+            }
+            std::chrono::milliseconds encoding_time = std::chrono::duration_cast<std::chrono::milliseconds>(myclock_t::now() - t0);
+            cout << "Image size: " << rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3 
+                 << "; Compressed size: " << compressed_image_size 
+                 << "; Encoding time: " << std::to_string(encoding_time.count()) << "ms" << endl;
+
+            m_imagePublisher->publish_compressed_image(compressed_image, stamp, "jpeg", compressed_image_size);
+
+            // free(compressed_image); 
+        }
     }
 
     void onKeyDown(int key, int scancode, int mods) override
