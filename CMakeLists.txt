@@ -66,35 +66,11 @@ include_directories(${SDK_BINARY_DIR}/configured/samples)
 configure_file(src/framework/DataPath.hpp.in
                ${SDK_BINARY_DIR}/configured/samples/framework/DataPath.hpp)
 
-add_subdirectory(src/framework)
-
-#-------------------------------------------------------------------------------
-# Project files
-#-------------------------------------------------------------------------------
-set(SOURCES
-    src/main.cpp
-    src/LMImagePublisher.cpp
-)
-
-set(LIBRARIES
-    glfw
-    dw_samples_framework
-    ${Driveworks_LIBRARIES}
-    lodepng-src
-    gpujpeg
-    ${catkin_LIBRARIES}
-)
-
-#-------------------------------------------------------------------------------
-# Final target
-#-------------------------------------------------------------------------------
-add_executable(${PROJECT_NAME} ${SOURCES})
-target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBRARIES})
-
-# ------------------------------------------------------------------------------
-# Install target
-# ------------------------------------------------------------------------------
-sdk_add_sample(${PROJECT_NAME})
+include_directories(${SDK_SOURCE_DIR}/src/common)
+set(SUB_DIRS framework;camera_gmsl_raw;camera_multiple_gmsl)
+foreach(SUB_DIR ${SUB_DIRS})
+    add_subdirectory(src/${SUB_DIR})
+endforeach()
 
 #-------------------------------------------------------------------------------
 # Cuda dependencies
