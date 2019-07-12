@@ -495,7 +495,7 @@ int main(int argc, const char *argv[])
         ProgramArguments::Option_t("type-e", "ar0231-rccb-bae-sf3324", "camera gmsl type\n"),
         ProgramArguments::Option_t("type-g", "ar0231-rccb-bae-sf3324", "camera gmsl type\n"),
 
-        ProgramArguments::Option_t("selector-mask", "111100000000", "Mask for camera selection [default 4 cameras in port AB]:\n"
+        ProgramArguments::Option_t("selector-mask", "000100010001", "Mask for camera selection [default one camera for each port]:\n"
                               "otherwise 0/1 based on camera number and port, ordered as 3210-3210-3210 (AB-CD-EF). Note that "
                               "the port is serial so camera N can be activated only of camera N-1 is active\n"
                               ),
@@ -504,15 +504,15 @@ int main(int argc, const char *argv[])
         ProgramArguments::Option_t("node-name",  "camera_multiple_gmsl_publisher"),
         ProgramArguments::Option_t("offscreen",  "false"),
         ProgramArguments::Option_t("compressed", "false"),
-        ProgramArguments::Option_t("ros-topic-0",  "/camera/image/0"),
+        ProgramArguments::Option_t("ros-topic-0",  "/camera/image"),
         ProgramArguments::Option_t("ros-topic-1",  "/camera/image/1"),
         ProgramArguments::Option_t("ros-topic-2",  "/camera/image/2"),
         ProgramArguments::Option_t("ros-topic-3",  "/camera/image/3"),
-        ProgramArguments::Option_t("ros-topic-4",  "/camera/image/4"),
+        ProgramArguments::Option_t("ros-topic-4",  "/camera/front_image"),
         ProgramArguments::Option_t("ros-topic-5",  "/camera/image/5"),
         ProgramArguments::Option_t("ros-topic-6",  "/camera/image/6"),
         ProgramArguments::Option_t("ros-topic-7",  "/camera/image/7"),
-        ProgramArguments::Option_t("ros-topic-8",  "/camera/image/8"),
+        ProgramArguments::Option_t("ros-topic-8",  "/camera/side_image"),
         ProgramArguments::Option_t("ros-topic-9",  "/camera/image/9"),
         ProgramArguments::Option_t("ros-topic-10",  "/camera/image/10"),
         ProgramArguments::Option_t("ros-topic-11",  "/camera/image/11"),
