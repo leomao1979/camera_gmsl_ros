@@ -314,6 +314,10 @@ public:
             dwImage_destroy(&m_rcbImage);
         }
 
+        if (m_rgbImage) {
+            dwImage_destroy(&m_rgbImage);
+        }
+
         if (m_rgbaImage) {
             dwImage_destroy(&m_rgbaImage);
         }
@@ -331,9 +335,13 @@ public:
             dwSAL_releaseSensor(&m_camera);
         }
 
-        if (m_renderer)
-        {
+        if (m_renderer) {
             dwRenderer_release(&m_renderer);
+        }
+
+        if (m_imagePublisher) {
+            delete m_imagePublisher;
+            m_imagePublisher = nullptr;
         }
 
         dwSAL_release(&m_sal);
@@ -382,8 +390,7 @@ public:
         CHECK_DW_ERROR(dwSoftISP_bindInputRaw(rawImageCUDA, m_isp));
         // request the softISP to perform a demosaic and a tonemap. This is for edmonstration purposes, the demosaic
         // output will not be used in this sample, only the tonemap output
-        CHECK_DW_ERROR(dwSoftISP_setProcessType(m_ispOutput,
-                                                    m_isp));
+        CHECK_DW_ERROR(dwSoftISP_setProcessType(m_ispOutput, m_isp));
         CHECK_DW_ERROR(dwSoftISP_processDeviceAsync(m_isp));
 
         // Publish RGB image to ROS
@@ -432,7 +439,7 @@ public:
         m_gpujpeg_param_image.pixel_format = GPUJPEG_444_U8_P012;
 
         m_jpegEncoder = gpujpeg_encoder_create(NULL);
-        if (m_jpegEncoder == NULL) {
+        if (m_jpegEncoder == nullptr) {
             std::cout << "Failed to create gpujpeg encoder!" << std::endl;
         }
 
@@ -516,7 +523,7 @@ int main(int argc, const char **argv)
         ProgramArguments::Option_t("camera-fifo-size", "3", "Size of the internal camera fifo (minimum 3). "
                               "A larger value might be required during recording due to slowdown"),
         ProgramArguments::Option_t("ros-topic",  "/camera/image"),
-        ProgramArguments::Option_t("node-name",  "gmsl_camera_raw_publisher"),
+        ProgramArguments::Option_t("node-name",  "camera_gmsl_raw_publisher"),
         ProgramArguments::Option_t("offscreen",  "false"),
         ProgramArguments::Option_t("compressed", "false"),
 

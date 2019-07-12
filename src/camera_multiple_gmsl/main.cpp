@@ -57,6 +57,11 @@
 #include <framework/WindowGLFW.hpp>
 #include <framework/MathUtils.hpp>
 
+#include <ros/ros.h>
+#include <libgpujpeg/gpujpeg.h>
+#include "LMImagePublisher.hpp"
+
+using namespace std;
 using namespace dw_samples::common;
 
 #define MAX_PORTS_COUNT 4
@@ -72,11 +77,17 @@ private:
     // ------------------------------------------------
     dwContextHandle_t m_sdk                  = DW_NULL_HANDLE;
     dwSALHandle_t m_sal                      = DW_NULL_HANDLE;
-    dwRenderEngineHandle_t m_renderEngine               = DW_NULL_HANDLE;
+    dwRenderEngineHandle_t m_renderEngine    = DW_NULL_HANDLE;
     uint32_t m_tileVideo[MAX_PORTS_COUNT * 4];
 
     uint32_t m_activeCamerasPerPort[4] = {0};
     std::unique_ptr<ScreenshotHelper> m_screenshot;
+
+    struct gpujpeg_encoder *m_jpegEncoder = nullptr;
+    struct gpujpeg_parameters m_gpujpeg_param;
+    struct gpujpeg_image_parameters m_gpujpeg_param_image;
+
+    LMImagePublisher *m_imagePublishers[MAX_PORTS_COUNT * 4] = {nullptr};
 
     // which camera is connected to which port (for displaying the name on screen)
     const char* cameraToPort[MAX_PORTS_COUNT];
@@ -96,6 +107,7 @@ public:
 
     // holds a copy converted image from native to NvMedia rgba
     dwImageHandle_t m_rgbaFrame[MAX_PORTS_COUNT] = {DW_NULL_HANDLE};
+    dwImageHandle_t m_rgbFrame[MAX_PORTS_COUNT]  = {DW_NULL_HANDLE};
 
     /// -----------------------------
     /// Initialize application
@@ -242,7 +254,6 @@ public:
 
             CHECK_DW_ERROR(dwRenderEngine_initialize(&m_renderEngine, &params, m_sdk));
 
-
             dwRenderEngineTileState paramList[MAX_PORTS_COUNT * 4];
             for (uint32_t i = 0; i < totalCameras; ++i) {
                 dwRenderEngine_initTileState(&paramList[i]);
@@ -251,7 +262,6 @@ public:
             }
 
             dwRenderEngine_addTilesByCount(m_tileVideo, totalCameras, tilesPerRow, paramList, m_renderEngine);
-
         }
 
         //------------------------------------------------------------------------------
@@ -267,6 +277,22 @@ public:
             // create an image to hold the conversion from native to rgba, fit for streaming to gl
             CHECK_DW_ERROR(dwImage_create(&m_rgbaFrame[i], rgbaImageProperties, m_sdk));
             CHECK_DW_ERROR(dwImageStreamer_initialize(&m_streamerCUDAtoGL[i], &rgbaImageProperties, DW_IMAGE_GL, m_sdk));
+            // create an image to hold the conversion from RGBA to RGB for ROS publish
+            dwImageProperties rgbImageProperties = rgbaImageProperties;
+            rgbImageProperties.format = DW_IMAGE_FORMAT_RGB_UINT8;
+            CHECK_DW_ERROR(dwImage_create(&m_rgbFrame[i], rgbImageProperties, m_sdk));
+        }
+
+        //--------------------------------------------------------------------------
+        // initializes ROS publishers
+        // -------------------------------------------------------------------------
+        std::string selectorMask = getArgument("selector-mask");
+        for (uint32_t i = 0; i < selectorMask.length() && i < 16; i++) {
+            const char s = selectorMask[i];
+            if (s == '1') {
+                string rosTopicName = "ros-topic-" + i;
+                m_imagePublishers[i] = new LMImagePublisher(getArgument(rosTopicName.c_str()), enabled("compressed"));
+            }
         }
 
         m_screenshot.reset(new ScreenshotHelper(m_sdk, m_sal, getWindowWidth(), getWindowHeight(), "CameraGMSL_Multi"));
@@ -293,6 +319,9 @@ public:
         }
 
         for (uint32_t i = 0; i < MAX_PORTS_COUNT; ++i) {
+            if (m_rgbFrame[i]) {
+                CHECK_DW_ERROR(dwImage_destroy(&m_rgbFrame[i]));
+            }
             if (m_rgbaFrame[i]) {
                 CHECK_DW_ERROR(dwImage_destroy(&m_rgbaFrame[i]));
             }
@@ -303,6 +332,14 @@ public:
                 if (m_activeCamerasPerPort[i] > 0) {
                     dwSAL_releaseSensor(&m_camera[i]);
                 }
+            }
+        }
+
+        // Release ROS publishers
+        for (uint32_t i = 0; i < MAX_PORTS_COUNT * 4; ++i) {
+            if (m_imagePublishers[i] != nullptr) {
+                delete m_imagePublishers[i];
+                m_imagePublishers[i] = nullptr;
             }
         }
 
@@ -363,6 +400,7 @@ public:
             }
 
             for (uint32_t cameraSiblingID = 0; cameraSiblingID < m_activeCamerasPerPort[csiPort]; ++cameraSiblingID){
+                ros::Time stamp = ros::Time::now();
                 dwCameraFrameHandle_t frame;
 
                 // read from camera will update the internal active frame of the camera
@@ -390,6 +428,13 @@ public:
                 // convert native (yuv420 planar nvmedia) to rgba nvmedia
                 CHECK_DW_ERROR(dwImage_copyConvert(m_rgbaFrame[csiPort], frameNvMedia, m_sdk));
 
+                // Publish RGB image to ROS
+                CHECK_DW_ERROR(dwImage_copyConvert(m_rgbFrame[csiPort], m_rgbaFrame[csiPort], m_sdk));
+                dwImageCUDA* rgbImageCUDA;
+                CHECK_DW_ERROR(dwImage_getCUDA(&rgbImageCUDA, m_rgbFrame[csiPort]));
+                uint32_t cameraIndex = csiPort * 4 + cameraSiblingID;
+                publish_image(m_imagePublishers[cameraIndex], *rgbImageCUDA, stamp);
+
                 // stream that image to the GL domain
                 CHECK_DW_ERROR(dwImageStreamer_producerSend(m_rgbaFrame[csiPort], m_streamerCUDAtoGL[csiPort]));
 
@@ -415,7 +460,6 @@ public:
                             std::string(cameraToPort[csiPort]);
 
                     CHECK_DW_ERROR(dwRenderEngine_renderText2D(tileString.c_str(), {25, range.y - 25}, m_renderEngine));
-
                 }
 
                 // returned the consumed image
@@ -430,8 +474,15 @@ public:
         }
     }
 
-};
+    void publish_image(LMImagePublisher *publisher, dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
+        if (publisher == nullptr) return;
+        std::vector<uint8_t> cpuData;
+        cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
+        cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
+        publisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
+    } 
 
+};
 
 //------------------------------------------------------------------------------
 int main(int argc, const char *argv[])
@@ -450,6 +501,21 @@ int main(int argc, const char *argv[])
                               ),
 
         ProgramArguments::Option_t("tegra-slave", "0", "Optional parameter used only for Tegra B, enables slave mode.\n"),
+        ProgramArguments::Option_t("node-name",  "camera_multiple_gmsl_publisher"),
+        ProgramArguments::Option_t("offscreen",  "false"),
+        ProgramArguments::Option_t("compressed", "false"),
+        ProgramArguments::Option_t("ros-topic-0",  "/camera/image/0"),
+        ProgramArguments::Option_t("ros-topic-1",  "/camera/image/1"),
+        ProgramArguments::Option_t("ros-topic-2",  "/camera/image/2"),
+        ProgramArguments::Option_t("ros-topic-3",  "/camera/image/3"),
+        ProgramArguments::Option_t("ros-topic-4",  "/camera/image/4"),
+        ProgramArguments::Option_t("ros-topic-5",  "/camera/image/5"),
+        ProgramArguments::Option_t("ros-topic-6",  "/camera/image/6"),
+        ProgramArguments::Option_t("ros-topic-7",  "/camera/image/7"),
+        ProgramArguments::Option_t("ros-topic-8",  "/camera/image/8"),
+        ProgramArguments::Option_t("ros-topic-9",  "/camera/image/9"),
+        ProgramArguments::Option_t("ros-topic-10",  "/camera/image/10"),
+        ProgramArguments::Option_t("ros-topic-11",  "/camera/image/11"),
 
     }, "DriveWorks camera GMSL sample");
 

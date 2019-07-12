@@ -15,6 +15,7 @@ set(LIBRARIES
     dw_samples_framework
     ${Driveworks_LIBRARIES}
     lodepng-src
+    gpujpeg
     ${catkin_LIBRARIES}
 )
 
