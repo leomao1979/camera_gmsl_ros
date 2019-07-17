@@ -575,7 +575,7 @@ int DriveWorksSample::run()
         // Count fps and maybe sleep
         tryToSleep();
 
-        if (shouldRun() && !m_reset && m_window)
+        if (shouldRun() && !m_reset && !m_pause && m_window)
         {
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             m_profiler.tic("onRender", true);

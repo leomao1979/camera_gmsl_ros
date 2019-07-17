@@ -59,7 +59,7 @@
 
 #include <ros/ros.h>
 #include <libgpujpeg/gpujpeg.h>
-#include "LMImagePublisher.hpp"
+#include "GMSLCameraRosNode.hpp"
 
 using namespace std;
 using namespace dw_samples::common;
@@ -87,7 +87,7 @@ private:
     struct gpujpeg_parameters m_gpujpeg_param;
     struct gpujpeg_image_parameters m_gpujpeg_param_image;
 
-    LMImagePublisher *m_imagePublishers[MAX_PORTS_COUNT * 4] = {nullptr};
+    GMSLCameraRosNode *m_rosNode[MAX_PORTS_COUNT * 4] = {nullptr};
 
     // which camera is connected to which port (for displaying the name on screen)
     const char* cameraToPort[MAX_PORTS_COUNT];
@@ -273,6 +273,8 @@ public:
             dwImageProperties rgbaImageProperties{};
             dwSensorCamera_getImageProperties(&rgbaImageProperties, DW_CAMERA_OUTPUT_NATIVE_PROCESSED, m_camera[i]);
             rgbaImageProperties.format = DW_IMAGE_FORMAT_RGBA_UINT8;
+            // Leo added
+            rgbaImageProperties.type   = DW_IMAGE_CUDA;
 
             // create an image to hold the conversion from native to rgba, fit for streaming to gl
             CHECK_DW_ERROR(dwImage_create(&m_rgbaFrame[i], rgbaImageProperties, m_sdk));
@@ -291,7 +293,7 @@ public:
             const char s = selectorMask[i];
             if (s == '1') {
                 string rosTopicName = "ros-topic-" + i;
-                m_imagePublishers[i] = new LMImagePublisher(getArgument(rosTopicName.c_str()), enabled("compressed"));
+                m_rosNode[i] = new GMSLCameraRosNode(this, getArgument(rosTopicName.c_str()), enabled("compressed"));
             }
         }
 
@@ -337,9 +339,9 @@ public:
 
         // Release ROS publishers
         for (uint32_t i = 0; i < MAX_PORTS_COUNT * 4; ++i) {
-            if (m_imagePublishers[i] != nullptr) {
-                delete m_imagePublishers[i];
-                m_imagePublishers[i] = nullptr;
+            if (m_rosNode[i] != nullptr) {
+                delete m_rosNode[i];
+                m_rosNode[i] = nullptr;
             }
         }
 
@@ -417,7 +419,7 @@ public:
                 CHECK_DW_ERROR(dwRenderEngine_setTile(m_tileVideo[cameraSiblingID + tileIndex], m_renderEngine));
                 CHECK_DW_ERROR(dwRenderEngine_resetTile(m_renderEngine));
                 // get an image with the desired output format
-
+/**
                 dwImageHandle_t frameNvMedia;
                 // see sample_camera_gmsl for how to directly grab a CUDA processed image from Camera. Because of a limitation
                 // on the PX2 DGPU, streaming CUDA->GL for rendering has performance issues, so for this sample
@@ -427,13 +429,15 @@ public:
 
                 // convert native (yuv420 planar nvmedia) to rgba nvmedia
                 CHECK_DW_ERROR(dwImage_copyConvert(m_rgbaFrame[csiPort], frameNvMedia, m_sdk));
-
+*/
+                // dwImageHandle_t frameCUDA;
+                CHECK_DW_ERROR(dwSensorCamera_getImage(&m_rgbaFrame[csiPort], DW_CAMERA_OUTPUT_CUDA_RGBA_UINT8, frame));
                 // Publish RGB image to ROS
                 CHECK_DW_ERROR(dwImage_copyConvert(m_rgbFrame[csiPort], m_rgbaFrame[csiPort], m_sdk));
                 dwImageCUDA* rgbImageCUDA;
                 CHECK_DW_ERROR(dwImage_getCUDA(&rgbImageCUDA, m_rgbFrame[csiPort]));
                 uint32_t cameraIndex = csiPort * 4 + cameraSiblingID;
-                publish_image(m_imagePublishers[cameraIndex], *rgbImageCUDA, stamp);
+                publish_image(m_rosNode[cameraIndex], *rgbImageCUDA, stamp);
 
                 // stream that image to the GL domain
                 CHECK_DW_ERROR(dwImageStreamer_producerSend(m_rgbaFrame[csiPort], m_streamerCUDAtoGL[csiPort]));
@@ -474,12 +478,12 @@ public:
         }
     }
 
-    void publish_image(LMImagePublisher *publisher, dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
-        if (publisher == nullptr) return;
+    void publish_image(GMSLCameraRosNode *rosNode, dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
+        if (rosNode == nullptr) return;
         std::vector<uint8_t> cpuData;
         cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
         cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
-        publisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
+        rosNode->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
     } 
 
 };
@@ -518,6 +522,11 @@ int main(int argc, const char *argv[])
         ProgramArguments::Option_t("ros-topic-11",  "/camera/image/11"),
 
     }, "DriveWorks camera GMSL sample");
+
+    string nodeName = args.get("node-name");
+    cout << "nodeName: " << nodeName << endl;
+    cout << "selector-mask: " << args.get("selector-mask") << endl;
+    ros::init(argc, const_cast<char **>(argv), nodeName);
 
     // -------------------
     // initialize and start a window application (with offscreen support if required)

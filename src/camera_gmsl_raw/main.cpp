@@ -55,7 +55,7 @@
 
 #include <ros/ros.h>
 #include <libgpujpeg/gpujpeg.h>
-#include "LMImagePublisher.hpp"
+#include "GMSLCameraRosNode.hpp"
 
 using namespace std;
 using namespace dw_samples::common;
@@ -79,7 +79,7 @@ private:
     struct gpujpeg_parameters m_gpujpeg_param;
     struct gpujpeg_image_parameters m_gpujpeg_param_image;
 
-    LMImagePublisher *m_imagePublisher = nullptr;
+    GMSLCameraRosNode *m_rosNode = nullptr;
 
 public:
 
@@ -298,7 +298,7 @@ public:
         // initializes ROS publisher
         // -------------------------------------------------------------------------
         {
-            m_imagePublisher = new LMImagePublisher(getArgument("ros-topic"), enabled("compressed"));
+            m_rosNode = new GMSLCameraRosNode(this, getArgument("ros-topic"), enabled("compressed"));
         }
 
         return true;
@@ -339,9 +339,9 @@ public:
             dwRenderer_release(&m_renderer);
         }
 
-        if (m_imagePublisher) {
-            delete m_imagePublisher;
-            m_imagePublisher = nullptr;
+        if (m_rosNode) {
+            delete m_rosNode;
+            m_rosNode = nullptr;
         }
 
         dwSAL_release(&m_sal);
@@ -457,7 +457,7 @@ public:
             std::vector<uint8_t> cpuData;
             cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
             cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
-            m_imagePublisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
+            m_rosNode->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
         } else {
             // Compress with lodepng
             // std::vector<uint8_t> cpuData;
@@ -483,7 +483,7 @@ public:
                  << "; Compressed size: " << compressed_image_size 
                  << "; Encoding time: " << std::to_string(encoding_time.count()) << "ms" << endl;
 
-            m_imagePublisher->publish_compressed_image(compressed_image, stamp, "jpeg", compressed_image_size);
+            m_rosNode->publish_compressed_image(compressed_image, stamp, "jpeg", compressed_image_size);
 
             // free(compressed_image); 
         }
@@ -526,6 +526,7 @@ int main(int argc, const char **argv)
         ProgramArguments::Option_t("node-name",  "camera_gmsl_raw_publisher"),
         ProgramArguments::Option_t("offscreen",  "false"),
         ProgramArguments::Option_t("compressed", "false"),
+        ProgramArguments::Option_t("enabled",    "true"),
 
     }, "DriveWorks camera GMSL Raw sample");
 
@@ -539,7 +540,9 @@ int main(int argc, const char **argv)
     CameraGMSLRawSample app(args);
 
     app.initializeWindow("Camera GMSL Raw sample", 1280, 800, args.enabled("offscreen"));
-
+    if (!args.enabled("enabled")) {
+        app.pause(); 
+    }
     return app.run();
 }
 
