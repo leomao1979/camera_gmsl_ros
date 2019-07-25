@@ -1,4 +1,4 @@
-#include "GMSLCameraRosNode.hpp"
+#include "ROSImagePublisher.hpp"
 
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
@@ -9,21 +9,18 @@
 #include <cv_bridge/cv_bridge.h>
 #endif
 
-GMSLCameraRosNode::GMSLCameraRosNode(DriveWorksSample* app, const std::string& topic, bool compress) : m_it(m_nh), m_app(app) {
+ROSImagePublisher::ROSImagePublisher(ros::NodeHandle &node, const std::string& topic, bool compress) : m_it(node) {
     if (compress) {
-        m_pub = m_nh.advertise<sensor_msgs::CompressedImage>(topic, 1); 
+        m_pub = node.advertise<sensor_msgs::CompressedImage>(topic, 1); 
     } else {
         m_imagePub = m_it.advertise(topic, 1);
     }
-
-    std::string enabledTopic = topic + "/enable";
-    m_nh.subscribe(enabledTopic, 1, &GMSLCameraRosNode::processEnabled, this);
 
     m_seq = 1;
 }
 
 // data: RGB
-void GMSLCameraRosNode::publish_image(uint8_t* data, const ros::Time& stamp, int width, int height) {
+void ROSImagePublisher::publish_image(uint8_t* data, const ros::Time& stamp, int width, int height) {
     std_msgs::Header header;
     header.stamp = stamp;
     header.seq = m_seq++;
@@ -47,7 +44,7 @@ void GMSLCameraRosNode::publish_image(uint8_t* data, const ros::Time& stamp, int
 }
 
 // data: compressed image
-void GMSLCameraRosNode::publish_compressed_image(uint8_t* data, const ros::Time& stamp, const std::string& format, size_t size) {
+void ROSImagePublisher::publish_compressed_image(uint8_t* data, const ros::Time& stamp, const std::string& format, size_t size) {
     sensor_msgs::CompressedImage c_img_msg;
     std_msgs::Header header;
     header.seq = m_seq ++;
@@ -61,10 +58,3 @@ void GMSLCameraRosNode::publish_compressed_image(uint8_t* data, const ros::Time&
     m_pub.publish(c_img_msg);
 }
 
-void GMSLCameraRosNode::processEnabled(const std_msgs::Bool::ConstPtr& msg) {
-    if (msg->data) {
-        m_app->resume(); 
-    } else {
-        m_app->pause(); 
-    }
-}

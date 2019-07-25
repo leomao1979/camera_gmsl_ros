@@ -48,6 +48,8 @@
 #include <csignal>
 #endif
 
+#include <ros/ros.h>
+
 namespace dw_samples
 {
 namespace common
@@ -588,6 +590,8 @@ int DriveWorksSample::run()
 
         if(!m_pause)
             m_frameIdx++;
+
+        ros::spinOnce();
     }
 
     // Show timings

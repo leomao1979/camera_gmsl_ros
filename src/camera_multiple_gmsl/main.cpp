@@ -59,7 +59,7 @@
 
 #include <ros/ros.h>
 #include <libgpujpeg/gpujpeg.h>
-#include "GMSLCameraRosNode.hpp"
+#include "ROSImagePublisher.hpp"
 
 using namespace std;
 using namespace dw_samples::common;
@@ -87,8 +87,8 @@ private:
     struct gpujpeg_parameters m_gpujpeg_param;
     struct gpujpeg_image_parameters m_gpujpeg_param_image;
 
-    GMSLCameraRosNode *m_rosNode[MAX_PORTS_COUNT * 4] = {nullptr};
-
+    ROSImagePublisher *m_imagePublisher[MAX_PORTS_COUNT * 4] = {nullptr};
+    ros::NodeHandle& m_node;
     // which camera is connected to which port (for displaying the name on screen)
     const char* cameraToPort[MAX_PORTS_COUNT];
 public:
@@ -112,7 +112,7 @@ public:
     /// -----------------------------
     /// Initialize application
     /// -----------------------------
-    CameraMultiGMSLSample(const ProgramArguments& args) : DriveWorksSample(args) {}
+    CameraMultiGMSLSample(const ProgramArguments& args, ros::NodeHandle& node) : DriveWorksSample(args), m_node(node) {}
 
     void initializeCameras()
     {
@@ -293,7 +293,7 @@ public:
             const char s = selectorMask[i];
             if (s == '1') {
                 string rosTopicName = "ros-topic-" + i;
-                m_rosNode[i] = new GMSLCameraRosNode(this, getArgument(rosTopicName.c_str()), enabled("compressed"));
+                m_imagePublisher[i] = new ROSImagePublisher(m_node, getArgument(rosTopicName.c_str()), enabled("compressed"));
             }
         }
 
@@ -339,9 +339,9 @@ public:
 
         // Release ROS publishers
         for (uint32_t i = 0; i < MAX_PORTS_COUNT * 4; ++i) {
-            if (m_rosNode[i] != nullptr) {
-                delete m_rosNode[i];
-                m_rosNode[i] = nullptr;
+            if (m_imagePublisher[i] != nullptr) {
+                delete m_imagePublisher[i];
+                m_imagePublisher[i] = nullptr;
             }
         }
 
@@ -437,7 +437,7 @@ public:
                 dwImageCUDA* rgbImageCUDA;
                 CHECK_DW_ERROR(dwImage_getCUDA(&rgbImageCUDA, m_rgbFrame[csiPort]));
                 uint32_t cameraIndex = csiPort * 4 + cameraSiblingID;
-                publish_image(m_rosNode[cameraIndex], *rgbImageCUDA, stamp);
+                publish_image(m_imagePublisher[cameraIndex], *rgbImageCUDA, stamp);
 
                 // stream that image to the GL domain
                 CHECK_DW_ERROR(dwImageStreamer_producerSend(m_rgbaFrame[csiPort], m_streamerCUDAtoGL[csiPort]));
@@ -478,12 +478,12 @@ public:
         }
     }
 
-    void publish_image(GMSLCameraRosNode *rosNode, dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
-        if (rosNode == nullptr) return;
+    void publish_image(ROSImagePublisher *imagePublisher, dwImageCUDA& rgbImageCUDA, ros::Time& stamp) {
+        if (imagePublisher == nullptr) return;
         std::vector<uint8_t> cpuData;
         cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
         cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
-        rosNode->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
+        imagePublisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
     } 
 
 };
@@ -505,7 +505,6 @@ int main(int argc, const char *argv[])
                               ),
 
         ProgramArguments::Option_t("tegra-slave", "0", "Optional parameter used only for Tegra B, enables slave mode.\n"),
-        ProgramArguments::Option_t("node-name",  "camera_multiple_gmsl_publisher"),
         ProgramArguments::Option_t("offscreen",  "false"),
         ProgramArguments::Option_t("compressed", "false"),
         ProgramArguments::Option_t("ros-topic-0",  "/camera/image"),
@@ -523,14 +522,13 @@ int main(int argc, const char *argv[])
 
     }, "DriveWorks camera GMSL sample");
 
-    string nodeName = args.get("node-name");
-    cout << "nodeName: " << nodeName << endl;
     cout << "selector-mask: " << args.get("selector-mask") << endl;
-    ros::init(argc, const_cast<char **>(argv), nodeName);
+    ros::init(argc, const_cast<char **>(argv), "camera_multiple_gmsl", ros::init_options::AnonymousName);
+    ros::NodeHandle nh;
 
     // -------------------
     // initialize and start a window application (with offscreen support if required)
-    CameraMultiGMSLSample app(args);
+    CameraMultiGMSLSample app(args, nh);
 
     app.initializeWindow("Camera GMSL sample", 1200, 800, args.enabled("offscreen"));
 

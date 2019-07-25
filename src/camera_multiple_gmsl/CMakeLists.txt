@@ -7,7 +7,7 @@ project(camera_multiple_gmsl C CXX)
 #-------------------------------------------------------------------------------
 set(SOURCES
     main.cpp
-    ../common/GMSLCameraRosNode.cpp
+    ../common/ROSImagePublisher.cpp
 )
 
 set(LIBRARIES

@@ -53,9 +53,11 @@
 #include <framework/DataPath.hpp>
 #include <framework/WindowGLFW.hpp>
 
-#include <ros/ros.h>
 #include <libgpujpeg/gpujpeg.h>
-#include "GMSLCameraRosNode.hpp"
+
+#include <ros/ros.h>
+#include <std_msgs/String.h>
+#include "ROSImagePublisher.hpp"
 
 using namespace std;
 using namespace dw_samples::common;
@@ -79,7 +81,8 @@ private:
     struct gpujpeg_parameters m_gpujpeg_param;
     struct gpujpeg_image_parameters m_gpujpeg_param_image;
 
-    GMSLCameraRosNode *m_rosNode = nullptr;
+    ROSImagePublisher *m_imagePublisher = nullptr;
+    bool m_cameraStarted         = false;
 
 public:
 
@@ -104,18 +107,55 @@ public:
     /// -----------------------------
     /// Initialize application
     /// -----------------------------
-    CameraGMSLRawSample(const ProgramArguments& args)
-        : DriveWorksSample(args)
+    CameraGMSLRawSample(const ProgramArguments& args, ROSImagePublisher *imagePublisher)
+        : DriveWorksSample(args), m_imagePublisher(imagePublisher)
     {
     }
 
     void onProcess() override
-    {}
+    {
+        if (!m_cameraStarted) {
+            CHECK_DW_ERROR(dwSensor_start(m_camera));
+            m_cameraStarted = true;
+        } 
+    }
+
+    void onPause() override 
+    {
+        if (m_cameraStarted) {
+            CHECK_DW_ERROR(dwSensor_stop(m_camera));
+            m_cameraStarted = false;
+        } 
+    }
+
+    void processEnable(const std_msgs::String::ConstPtr& msg)
+    {
+        std::cout << "Received ROS command: enable == " << msg->data << std::endl;
+        if (msg->data == "true") {
+            std::cout << "Start camera." << std::endl;
+            if (m_camera == DW_NULL_HANDLE) {
+                initialize();
+            }
+            resume();
+        } else {
+            std::cout << "Stop camera." << std::endl;
+            pause();
+        }
+    }
+
+    bool onInitialize() override
+    {
+        bool result = true;
+        if (enabled("start-camera")) {
+            result = initialize(); 
+        }
+        return result;
+    }
 
     /// -----------------------------
     /// Initialize Renderer, Sensors, and Image Streamers, Egomotion
     /// -----------------------------
-    bool onInitialize() override
+    bool initialize()
     {
         // -----------------------------------------
         // Initialize DriveWorks SDK context and SAL
@@ -187,6 +227,7 @@ public:
             // sensor can take some time to start, it's possible to call the read function and check if the return status is ok
             // before proceding
             CHECK_DW_ERROR(dwSensor_start(m_camera));
+            m_cameraStarted = true;
 
             dwCameraFrameHandle_t frame;
             dwStatus status = DW_NOT_READY;
@@ -294,13 +335,6 @@ public:
             }
         }
 
-        //--------------------------------------------------------------------------
-        // initializes ROS publisher
-        // -------------------------------------------------------------------------
-        {
-            m_rosNode = new GMSLCameraRosNode(this, getArgument("ros-topic"), enabled("compressed"));
-        }
-
         return true;
     }
 
@@ -337,11 +371,6 @@ public:
 
         if (m_renderer) {
             dwRenderer_release(&m_renderer);
-        }
-
-        if (m_rosNode) {
-            delete m_rosNode;
-            m_rosNode = nullptr;
         }
 
         dwSAL_release(&m_sal);
@@ -457,7 +486,7 @@ public:
             std::vector<uint8_t> cpuData;
             cpuData.resize(rgbImageCUDA.prop.width * rgbImageCUDA.prop.height * 3);
             cudaMemcpy2D(cpuData.data(), rgbImageCUDA.prop.width*3, rgbImageCUDA.dptr[0], rgbImageCUDA.pitch[0], rgbImageCUDA.prop.width*3, rgbImageCUDA.prop.height, cudaMemcpyDeviceToHost);
-            m_rosNode->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
+            m_imagePublisher->publish_image(cpuData.data(), stamp, rgbImageCUDA.prop.width, rgbImageCUDA.prop.height);
         } else {
             // Compress with lodepng
             // std::vector<uint8_t> cpuData;
@@ -483,7 +512,7 @@ public:
                  << "; Compressed size: " << compressed_image_size 
                  << "; Encoding time: " << std::to_string(encoding_time.count()) << "ms" << endl;
 
-            m_rosNode->publish_compressed_image(compressed_image, stamp, "jpeg", compressed_image_size);
+            m_imagePublisher->publish_compressed_image(compressed_image, stamp, "jpeg", compressed_image_size);
 
             // free(compressed_image); 
         }
@@ -523,26 +552,27 @@ int main(int argc, const char **argv)
         ProgramArguments::Option_t("camera-fifo-size", "3", "Size of the internal camera fifo (minimum 3). "
                               "A larger value might be required during recording due to slowdown"),
         ProgramArguments::Option_t("ros-topic",  "/camera/image"),
-        ProgramArguments::Option_t("node-name",  "camera_gmsl_raw_publisher"),
         ProgramArguments::Option_t("offscreen",  "false"),
         ProgramArguments::Option_t("compressed", "false"),
-        ProgramArguments::Option_t("enabled",    "true"),
+        ProgramArguments::Option_t("start-camera", "true"),
 
     }, "DriveWorks camera GMSL Raw sample");
 
-    string nodeName = args.get("node-name");
-    cout << "nodeName: " << nodeName << endl;
-    cout << "ros-topic: " << args.get("ros-topic") << endl;
-    ros::init(argc, const_cast<char **>(argv), nodeName);
+    cout << "ros-topic: "     << args.get("ros-topic") << endl;
+    cout << "start-camera: "  << args.get("start-camera") << endl;
+
+    ros::init(argc, const_cast<char **>(argv), "camera_gmsl_raw", ros::init_options::AnonymousName);
+    ros::NodeHandle nh;
+    ROSImagePublisher imagePublisher(nh, args.get("ros-topic"), args.enabled("compressed"));
 
     // -------------------
     // initialize and start a window application (with offscreen support if required)
-    CameraGMSLRawSample app(args);
-
+    CameraGMSLRawSample app(args, &imagePublisher);
     app.initializeWindow("Camera GMSL Raw sample", 1280, 800, args.enabled("offscreen"));
-    if (!args.enabled("enabled")) {
-        app.pause(); 
-    }
+
+    string topicName = args.get("ros-topic") + string("/enable");
+    nh.subscribe(topicName, 1, &CameraGMSLRawSample::processEnable, &app);
+
     return app.run();
 }
 
