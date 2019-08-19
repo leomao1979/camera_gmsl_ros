@@ -67,7 +67,8 @@ configure_file(src/framework/DataPath.hpp.in
                ${SDK_BINARY_DIR}/configured/samples/framework/DataPath.hpp)
 
 include_directories(${SDK_SOURCE_DIR}/src/common)
-set(SUB_DIRS framework;camera_gmsl_raw;camera_multiple_gmsl)
+set(SUB_DIRS framework;camera_gmsl_raw)
+#set(SUB_DIRS framework;camera_gmsl_raw;camera_multiple_gmsl)
 foreach(SUB_DIR ${SUB_DIRS})
     add_subdirectory(src/${SUB_DIR})
 endforeach()

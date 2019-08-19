@@ -531,11 +531,9 @@ public:
     }
 };
 
-
 //------------------------------------------------------------------------------
 int main(int argc, const char **argv)
 {
-
     ProgramArguments args(argc, argv,
     {
         ProgramArguments::Option_t("camera-type", "ar0231-rccb-bae-sf3324", "camera gmsl type (see sample_sensors_info for all available camera types on this platform)\n"),
@@ -553,14 +551,16 @@ int main(int argc, const char **argv)
         ProgramArguments::Option_t("tegra-slave", "0", "Optional parameter used only for Tegra B, enables slave mode."),
         ProgramArguments::Option_t("camera-fifo-size", "3", "Size of the internal camera fifo (minimum 3). "
                               "A larger value might be required during recording due to slowdown"),
-        ProgramArguments::Option_t("ros-topic",  "/camera/image"),
-        ProgramArguments::Option_t("offscreen",  "false"),
-        ProgramArguments::Option_t("compressed", "false"),
+        ProgramArguments::Option_t("ros-topic",    "/camera/image"),
+        ProgramArguments::Option_t("offscreen",    "false"),
+        ProgramArguments::Option_t("compressed",   "false"),
         ProgramArguments::Option_t("start-camera", "true"),
+        ProgramArguments::Option_t("processrate",  "15"),
 
     }, "DriveWorks camera GMSL Raw sample");
 
-    cout << "ros-topic: "     << args.get("ros-topic") << endl;
+    cout << "ros topic: "     << args.get("ros-topic")    << endl;
+    cout << "process rate: "  << args.get("processrate")  << endl;
     cout << "start-camera: "  << args.get("start-camera") << endl;
 
     ros::init(argc, const_cast<char **>(argv), "camera_gmsl_raw", ros::init_options::AnonymousName);
@@ -571,7 +571,7 @@ int main(int argc, const char **argv)
     // initialize and start a window application (with offscreen support if required)
     CameraGMSLRawSample app(args, &imagePublisher);
     app.initializeWindow("Camera GMSL Raw sample", 1280, 800, args.enabled("offscreen"));
-    app.setProcessRate(15);
+    app.setProcessRate(std::stoi(args.get("processrate")));
 
     string topicName = args.get("ros-topic") + string("/enable");
     ros::Subscriber sub = nh.subscribe(topicName, 1, &CameraGMSLRawSample::processEnable, &app);
