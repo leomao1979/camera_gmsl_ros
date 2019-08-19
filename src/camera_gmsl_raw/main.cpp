@@ -148,6 +148,8 @@ public:
         bool result = true;
         if (enabled("start-camera")) {
             result = initialize(); 
+        } else {
+            pause(); 
         }
         return result;
     }
@@ -569,9 +571,10 @@ int main(int argc, const char **argv)
     // initialize and start a window application (with offscreen support if required)
     CameraGMSLRawSample app(args, &imagePublisher);
     app.initializeWindow("Camera GMSL Raw sample", 1280, 800, args.enabled("offscreen"));
+    app.setProcessRate(15);
 
     string topicName = args.get("ros-topic") + string("/enable");
-    nh.subscribe(topicName, 1, &CameraGMSLRawSample::processEnable, &app);
+    ros::Subscriber sub = nh.subscribe(topicName, 1, &CameraGMSLRawSample::processEnable, &app);
 
     return app.run();
 }
